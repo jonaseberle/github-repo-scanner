@@ -159,9 +159,16 @@ Branch: default
 
 REPO URL                                          NAME              VERSION      VISIBILITY
 --------                                          ----              -------      ----------
+
+VERSION BELOW
 https://github.com/YOUR_ORG/project-alpha         project-alpha     ^3.2         private
-https://github.com/YOUR_ORG/client-portal         client-portal     N/A          private
 https://github.com/YOUR_ORG/marketing-site        marketing-site    ~3.1.0       public
+
+VERSION ABOVE
+https://github.com/YOUR_ORG/shop-backend          shop-backend      ^4.0         private
+
+N/A
+https://github.com/YOUR_ORG/client-portal         client-portal     N/A          private
 
 ================================================================================
 Summary:
@@ -173,12 +180,14 @@ Summary:
 
 ### Output Legend
 
+Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), NOT FOUND (package not in the dependency file) and N/A (no dependency file).
+
 | Color | Meaning |
 |-------|---------|
 | Red | Package found below target version |
 | Yellow | No dependency file (composer.lock/composer.json/package.json) |
 | Cyan | Dependency file exists but package not found |
-| Green | All repos at target version or higher |
+| Green | Package found at or above target version |
 
 ## Supported URL Formats
 

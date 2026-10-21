@@ -607,7 +607,7 @@ print_results() {
     dep_file_name=$(dep_file_name)
 
     echo ""
-    echo -e "${BOLD}Results: Repositories with $PACKAGE below version $BELOW_VERSION${NC}"
+    echo -e "${BOLD}Results: $PACKAGE in repositories (target version: $BELOW_VERSION)${NC}"
     echo "================================================================================"
     echo ""
 
@@ -617,17 +617,43 @@ print_results() {
 
     local has_results=0
 
-    for i in "${!RESULT_URLS[@]}"; do
+    # Group the rows: version below, version above, package not found, no file.
+    # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
+    local ordered_rows="" wanted_status i
+    for wanted_status in below ok not_in_file no_file error; do
+        for i in "${!RESULT_STATUS[@]}"; do
+            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" ]]; then
+                ordered_rows+=" $i"
+            fi
+        done
+    done
+
+    local group="" row_group
+    for i in $ordered_rows; do
         local status="${RESULT_STATUS[$i]}"
         local url="${RESULT_URLS[$i]}"
         local name="${RESULT_NAMES[$i]}"
         local version="${RESULT_VERSIONS[$i]}"
         local visibility="${RESULT_VISIBILITY[$i]}"
 
-        # Only show repos that are below version, have no file, or package not found
+        case "$status" in
+            below) row_group="VERSION BELOW" ;;
+            ok) row_group="VERSION ABOVE" ;;
+            not_in_file) row_group="NOT FOUND" ;;
+            *) row_group="N/A" ;;
+        esac
+        if [[ "$row_group" != "$group" ]]; then
+            group="$row_group"
+            echo ""
+            echo -e "${BOLD}$group${NC}"
+        fi
+
+        # Repos at or above the version do not count as results.
         if [[ "$status" == "below" ]]; then
             printf "${RED}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
             has_results=1
+        elif [[ "$status" == "ok" ]]; then
+            printf "${GREEN}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
             printf "${YELLOW}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
             has_results=1
