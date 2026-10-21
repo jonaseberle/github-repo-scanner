@@ -70,6 +70,9 @@ Options:
   --below <version>   Find packages below this major version
   --branch <name>     Optional: specific branch to check (default: repo's default)
   --delay <seconds>   Optional: delay between API requests (default: 1)
+  --alternativePaths <path1[,path2,...]>
+                      Optional: directories to search for the dependency file
+                      if it is not in the repository root, in this order
   -v, --verbose       Print each command before it runs (set -x)
   --help              Show help message
 ```
@@ -219,7 +222,7 @@ The script extracts the major version from common constraint formats:
 
 ## Limitations
 
-- Only scans the root dependency file (not monorepo subdirectories)
+- Only scans the root dependency file, or the first one found in `--alternativePaths` (not all monorepo subdirectories)
 - Compares major versions only (not minor/patch)
 - Maximum ~1000 repos per scan (GitHub API limit)
 - Reads `package.json`, not `package-lock.json`

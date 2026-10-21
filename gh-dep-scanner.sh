@@ -23,6 +23,7 @@ BOLD='\033[1m'
 # Default values
 DELAY=1
 BRANCH=""
+ALTERNATIVE_PATHS=""
 URL=""
 REPO=""
 TYPE=""
@@ -82,6 +83,12 @@ ${BOLD}OPTIONS:${NC}
 
     --delay <seconds>   Optional: delay between API requests (default: 1)
                         Increase if hitting rate limits
+
+    --alternativePaths <path1[,path2,...]>
+                        Optional: directories to search for the dependency
+                        file if it is not in the repository root.
+                        They are tried in the given order.
+                        Example: app,src/web
 
     -v, --verbose       Print each command before it runs (set -x)
 
@@ -209,6 +216,10 @@ parse_args() {
                 ;;
             --delay)
                 DELAY="$2"
+                shift 2
+                ;;
+            --alternativePaths)
+                ALTERNATIVE_PATHS="$2"
                 shift 2
                 ;;
             -v|--verbose)
@@ -396,18 +407,28 @@ fetch_dependency_file() {
     local dep_file
     dep_file=$(dep_file_name)
 
+    # The leading comma adds the repository root as the first path.
+    local -a paths
+    IFS=',' read -r -a paths <<< ",$ALTERNATIVE_PATHS"
+
     # Fetch file content from GitHub API.
     # Use the raw media type: the JSON response has no content for files over 1 MB (e.g. composer.lock).
-    local response
-    response=$(gh api --header "Accept: application/vnd.github.raw+json" "repos/$OWNER/$repo_name/contents/$dep_file?ref=$branch" 2>&1) || {
+    local path response
+    for path in "${paths[@]}"; do
+        path="${path%/}"
+        response=$(gh api --header "Accept: application/vnd.github.raw+json" "repos/$OWNER/$repo_name/contents/${path:+$path/}$dep_file?ref=$branch" 2>&1) && break
         # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
-        if [[ "$response" == *"(HTTP 404)"* ]]; then
-            echo "NOT_FOUND"
-            return
+        if [[ "$response" != *"(HTTP 404)"* ]]; then
+            print_error "Failed to fetch ${path:+$path/}$dep_file from $OWNER/$repo_name: $response"
+            exit 1
         fi
-        print_error "Failed to fetch $dep_file from $OWNER/$repo_name: $response"
-        exit 1
-    }
+        response=""
+    done
+
+    if [[ -z "$response" ]]; then
+        echo "NOT_FOUND"
+        return
+    fi
 
     if echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
         echo "$response"
