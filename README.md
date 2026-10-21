@@ -18,6 +18,7 @@ This script fills that gap.
 
 - Scans all repositories in a GitHub organization or personal account
 - Supports **Composer** (PHP) and **Node** (JavaScript) dependencies
+- Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type composerJson`)
 - Interactive mode or CLI flags for automation
 - Rate limiting to avoid GitHub API limits
 - Colored output with progress indicator
@@ -51,7 +52,7 @@ Simply run the script without arguments:
 
 You'll be prompted for:
 1. GitHub URL (org, personal or a single repository)
-2. Dependency type (composer/node)
+2. Dependency type (composer/node/composerJson)
 3. Package name
 4. Minimum version to check against
 5. Branch (optional)
@@ -63,7 +64,8 @@ You'll be prompted for:
 
 Options:
   --url <url>         GitHub URL (org or personal repos page, or one repo)
-  --type <type>       Dependency type: "composer" or "node"
+  --type <type>       Dependency type: "composer" (composer.lock), "composerJson"
+                      (composer.json) or "node" (package.json)
   --package <name>    Package name to search for
   --below <version>   Find packages below this major version
   --branch <name>     Optional: specific branch to check (default: repo's default)
@@ -164,7 +166,7 @@ Summary:
 | Color | Meaning |
 |-------|---------|
 | Red | Package found below target version |
-| Yellow | No dependency file (composer.json/package.json) |
+| Yellow | No dependency file (composer.lock/composer.json/package.json) |
 | Cyan | Dependency file exists but package not found |
 | Green | All repos at target version or higher |
 
@@ -200,7 +202,7 @@ The script extracts the major version from common constraint formats:
 - Only scans the root dependency file (not monorepo subdirectories)
 - Compares major versions only (not minor/patch)
 - Maximum ~1000 repos per scan (GitHub API limit)
-- Reads `composer.json` / `package.json`, not lock files
+- Reads `package.json`, not `package-lock.json`
 
 ## License
 

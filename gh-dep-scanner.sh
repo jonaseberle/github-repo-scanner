@@ -66,7 +66,10 @@ ${BOLD}OPTIONS:${NC}
                           https://github.com/orgs/MyOrg
                           https://github.com/owner/repo
 
-    --type <type>       Dependency type: "composer" or "node"
+    --type <type>       Dependency type:
+                          composer      installed version from composer.lock
+                          composerJson  version constraint from composer.json
+                          node          version constraint from package.json
 
     --package <name>    Package name to search for
                         Examples: livewire/livewire, laravel/framework, react
@@ -132,6 +135,14 @@ print_warning() {
 
 print_progress() {
     echo -ne "\r${CYAN}$1${NC}"
+}
+
+dep_file_name() {
+    case "$TYPE" in
+        composer) echo "composer.lock" ;;
+        composerJson) echo "composer.json" ;;
+        *) echo "package.json" ;;
+    esac
 }
 
 #===============================================================================
@@ -241,14 +252,16 @@ interactive_mode() {
     # Type
     if [[ -z "$TYPE" ]]; then
         echo -e "${CYAN}Select dependency type:${NC}"
-        echo "  1) composer (PHP - composer.json)"
+        echo "  1) composer (PHP - composer.lock, installed version)"
         echo "  2) node (JavaScript - package.json)"
+        echo "  3) composerJson (PHP - composer.json, version constraint)"
         read -r -p "> " type_choice
         case $type_choice in
             1|composer) TYPE="composer" ;;
             2|node) TYPE="node" ;;
+            3|composerJson) TYPE="composerJson" ;;
             *)
-                print_error "Invalid choice. Please enter 1, 2, 'composer', or 'node'."
+                print_error "Invalid choice. Please enter 1, 2, 3, 'composer', 'node', or 'composerJson'."
                 exit 1
                 ;;
         esac
@@ -258,7 +271,7 @@ interactive_mode() {
     # Package
     if [[ -z "$PACKAGE" ]]; then
         echo -e "${CYAN}Enter package name:${NC}"
-        if [[ "$TYPE" == "composer" ]]; then
+        if [[ "$TYPE" != "node" ]]; then
             echo "  Example: livewire/livewire, laravel/framework"
         else
             echo "  Example: react, vue, lodash"
@@ -381,16 +394,12 @@ fetch_dependency_file() {
     local repo_name="$1"
     local branch="$2"
     local dep_file
+    dep_file=$(dep_file_name)
 
-    if [[ "$TYPE" == "composer" ]]; then
-        dep_file="composer.json"
-    else
-        dep_file="package.json"
-    fi
-
-    # Fetch file content from GitHub API
+    # Fetch file content from GitHub API.
+    # Use the raw media type: the JSON response has no content for files over 1 MB (e.g. composer.lock).
     local response
-    response=$(gh api "repos/$OWNER/$repo_name/contents/$dep_file?ref=$branch" 2>&1) || {
+    response=$(gh api --header "Accept: application/vnd.github.raw+json" "repos/$OWNER/$repo_name/contents/$dep_file?ref=$branch" 2>&1) || {
         # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
         if [[ "$response" == *"(HTTP 404)"* ]]; then
             echo "NOT_FOUND"
@@ -400,12 +409,10 @@ fetch_dependency_file() {
         exit 1
     }
 
-    # Check if it's a valid response with content
-    if echo "$response" | jq -e '.content' &> /dev/null; then
-        # Decode base64 content
-        echo "$response" | jq -r '.content' | base64 -d 2>/dev/null || echo "PARSE_ERROR"
+    if echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
+        echo "$response"
     else
-        echo "NOT_FOUND"
+        echo "PARSE_ERROR"
     fi
 }
 
@@ -421,6 +428,9 @@ extract_version() {
     local version=""
 
     if [[ "$dep_type" == "composer" ]]; then
+        # Check in packages first, then packages-dev
+        version=$(echo "$json_content" | jq -r --arg pkg "$package" 'first((.packages // [])[], (.["packages-dev"] // [])[] | select(.name == $pkg) | .version) // empty' 2>/dev/null)
+    elif [[ "$dep_type" == "composerJson" ]]; then
         # Check in require first, then require-dev
         version=$(echo "$json_content" | jq -r --arg pkg "$package" '.require[$pkg] // .["require-dev"][$pkg] // empty' 2>/dev/null)
     else
@@ -507,13 +517,6 @@ is_below_version() {
 #===============================================================================
 
 scan_repos() {
-    local dep_file_name
-    if [[ "$TYPE" == "composer" ]]; then
-        dep_file_name="composer.json"
-    else
-        dep_file_name="package.json"
-    fi
-
     echo ""
     echo -e "${BOLD}Scanning $OWNER repositories for $PACKAGE < $BELOW_VERSION...${NC}"
     if [[ -n "$BRANCH" ]]; then
@@ -601,11 +604,7 @@ scan_repos() {
 
 print_results() {
     local dep_file_name
-    if [[ "$TYPE" == "composer" ]]; then
-        dep_file_name="composer.json"
-    else
-        dep_file_name="package.json"
-    fi
+    dep_file_name=$(dep_file_name)
 
     echo ""
     echo -e "${BOLD}Results: Repositories with $PACKAGE below version $BELOW_VERSION${NC}"
@@ -675,8 +674,8 @@ main() {
         exit 1
     fi
 
-    if [[ "$TYPE" != "composer" && "$TYPE" != "node" ]]; then
-        print_error "Type must be 'composer' or 'node'."
+    if [[ "$TYPE" != "composer" && "$TYPE" != "composerJson" && "$TYPE" != "node" ]]; then
+        print_error "Type must be 'composer', 'composerJson' or 'node'."
         exit 1
     fi
 
