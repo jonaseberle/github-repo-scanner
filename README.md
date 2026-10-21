@@ -62,7 +62,7 @@ You'll be prompted for:
 ./gh-dep-scanner.sh [OPTIONS]
 
 Options:
-  --url <url>         GitHub URL (org or personal repos page)
+  --url <url>         GitHub URL (org or personal repos page, or one repo)
   --type <type>       Dependency type: "composer" or "node"
   --package <name>    Package name to search for
   --below <version>   Find packages below this major version
@@ -167,6 +167,7 @@ https://github.com/orgs/YOUR_ORG/repositories
 https://github.com/orgs/YOUR_ORG
 https://github.com/USERNAME?tab=repositories
 https://github.com/USERNAME
+https://github.com/OWNER/REPO
 ```
 
 ## Version Comparison Logic

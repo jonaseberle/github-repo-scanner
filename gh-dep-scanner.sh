@@ -24,6 +24,7 @@ BOLD='\033[1m'
 DELAY=1
 BRANCH=""
 URL=""
+REPO=""
 TYPE=""
 PACKAGE=""
 BELOW_VERSION=""
@@ -49,20 +50,21 @@ show_help() {
     cat << EOF
 ${BOLD}GitHub Dependency Scanner${NC}
 
-Scans all repositories in a GitHub organization or personal account to find
-repos using a specific package below a given version.
+Scans all repositories in a GitHub organization or personal account (or a
+single repository) to find repos using a specific package below a given version.
 
 ${BOLD}USAGE:${NC}
     ./gh-dep-scanner.sh [OPTIONS]
     ./gh-dep-scanner.sh                    # Interactive mode
 
 ${BOLD}OPTIONS:${NC}
-    --url <url>         GitHub URL (org or personal repos page)
+    --url <url>         GitHub URL (org or personal repos page, or one repo)
                         Examples:
                           https://github.com/orgs/MyOrg/repositories
                           https://github.com/username?tab=repositories
                           https://github.com/username
                           https://github.com/orgs/MyOrg
+                          https://github.com/owner/repo
 
     --type <type>       Dependency type: "composer" or "node"
 
@@ -231,6 +233,7 @@ interactive_mode() {
         echo "    https://github.com/orgs/YOUR_ORG/repositories"
         echo "    https://github.com/USERNAME?tab=repositories"
         echo "    https://github.com/USERNAME"
+        echo "    https://github.com/OWNER/REPO"
         read -r -p "> " URL
         echo ""
     fi
@@ -316,11 +319,20 @@ parse_github_url() {
         return 0
     fi
 
+    # Pattern: https://github.com/OWNER/REPO (a single repository)
+    if [[ "$url" =~ github\.com/([^/?]+)/([^/?]+)$ ]]; then
+        OWNER="${BASH_REMATCH[1]}"
+        REPO="${BASH_REMATCH[2]%.git}"
+        OWNER_TYPE="repo"
+        return 0
+    fi
+
     print_error "Could not parse GitHub URL: $url"
     echo "  Expected formats:"
     echo "    https://github.com/orgs/ORG_NAME/repositories"
     echo "    https://github.com/USERNAME?tab=repositories"
     echo "    https://github.com/USERNAME"
+    echo "    https://github.com/OWNER/REPO"
     exit 1
 }
 
@@ -329,10 +341,16 @@ parse_github_url() {
 #===============================================================================
 
 fetch_repos() {
-    print_info "Fetching repositories for $OWNER_TYPE: $OWNER..."
+    print_info "Fetching repositories for $OWNER_TYPE: $OWNER${REPO:+/$REPO}..."
 
     local repos_json
-    if [[ "$OWNER_TYPE" == "org" ]]; then
+    if [[ "$OWNER_TYPE" == "repo" ]]; then
+        # Wrap in an array to get the same shape as "gh repo list".
+        repos_json=$(gh repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef --jq '[.]' 2>&1) || {
+            print_error "Failed to fetch repository: $OWNER/$REPO"
+            exit 1
+        }
+    elif [[ "$OWNER_TYPE" == "org" ]]; then
         repos_json=$(gh repo list "$OWNER" --limit 1000 --json name,url,isPrivate,defaultBranchRef 2>&1) || {
             print_error "Failed to fetch repositories for organization: $OWNER"
             exit 1
