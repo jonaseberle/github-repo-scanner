@@ -9,7 +9,7 @@
 # Usage: ./gh-dep-scanner.sh [options] or run interactively
 #===============================================================================
 
-set -euo pipefail
+set -o errexit -o nounset -o pipefail -o noclobber
 
 # Colors for output
 RED='\033[0;31m'
@@ -367,8 +367,13 @@ fetch_dependency_file() {
     # Fetch file content from GitHub API
     local response
     response=$(gh api "repos/$OWNER/$repo_name/contents/$dep_file?ref=$branch" 2>&1) || {
-        echo "NOT_FOUND"
-        return
+        # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
+        if [[ "$response" == *"(HTTP 404)"* ]]; then
+            echo "NOT_FOUND"
+            return
+        fi
+        print_error "Failed to fetch $dep_file from $OWNER/$repo_name: $response"
+        exit 1
     }
 
     # Check if it's a valid response with content
@@ -496,7 +501,7 @@ scan_repos() {
 
     local i=0
     while IFS= read -r repo_line; do
-        ((i++))
+        i=$((i + 1))
 
         local repo_name repo_url is_private default_branch
         repo_name=$(echo "$repo_line" | jq -r '.name')
@@ -526,11 +531,11 @@ scan_repos() {
         if [[ "$content" == "NOT_FOUND" ]]; then
             version_str="N/A"
             status="no_file"
-            ((NO_FILE_COUNT++))
+            NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
         elif [[ "$content" == "PARSE_ERROR" ]]; then
             version_str="Parse error"
             status="error"
-            ((NO_FILE_COUNT++))
+            NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
         else
             # Extract version for the package
             version_str=$(extract_version "$content" "$PACKAGE" "$TYPE")
@@ -538,12 +543,12 @@ scan_repos() {
             if [[ "$version_str" == "NOT_IN_FILE" ]]; then
                 version_str="Not found"
                 status="not_in_file"
-                ((NOT_FOUND_COUNT++))
+                NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
             else
                 # Check if below target version
                 if is_below_version "$version_str" "$BELOW_VERSION"; then
                     status="below"
-                    ((BELOW_COUNT++))
+                    BELOW_COUNT=$((BELOW_COUNT + 1))
                 else
                     status="ok"
                 fi
