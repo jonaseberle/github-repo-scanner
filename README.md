@@ -68,6 +68,7 @@ Options:
   --below <version>   Find packages below this major version
   --branch <name>     Optional: specific branch to check (default: repo's default)
   --delay <seconds>   Optional: delay between API requests (default: 1)
+  -v, --verbose       Print each command before it runs (set -x)
   --help              Show help message
 ```
 

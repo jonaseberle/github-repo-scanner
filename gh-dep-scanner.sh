@@ -78,6 +78,8 @@ ${BOLD}OPTIONS:${NC}
     --delay <seconds>   Optional: delay between API requests (default: 1)
                         Increase if hitting rate limits
 
+    -v, --verbose       Print each command before it runs (set -x)
+
     --help              Show this help message
 
 ${BOLD}EXAMPLES:${NC}
@@ -195,6 +197,10 @@ parse_args() {
             --delay)
                 DELAY="$2"
                 shift 2
+                ;;
+            -v|--verbose)
+                set -x
+                shift
                 ;;
             --help)
                 show_help
