@@ -27,7 +27,7 @@ COLOR_VISIBILITY=$'\033[2m'
 COLOR_PACKAGE=$'\033[4m'
 
 # Default values
-DELAY=1
+DELAY=0
 BRANCH=""
 BRANCHES=""
 HIDE_MERGED=0
@@ -52,6 +52,13 @@ TERM_COLUMNS=$(tput cols 2>/dev/null || echo 80)
 # One line per request: "cache <mtime>" or "network".
 # A file, because gh_cached runs in subshells.
 REQUEST_LOG=""
+# The rate limits: "<bucket> <remaining> <limit> <reset> <network requests then>".
+# Shared by all scans in this directory: they use the same rate limit.
+RATE_FILE="./var/lock/rate-limit"
+# One byte per network request of any scan in this directory.
+RATE_COUNTER="./var/lock/rate-requests"
+# Check the rate limit again after this many network requests.
+RATE_CHECK_EVERY=50
 URL=""
 REPO=""
 TYPE=""
@@ -153,9 +160,11 @@ ${BOLD}OPTIONS:${NC}
                         fully merged into the default branch (one request per
                         100 branches). Squash and rebase merges are not detected.
 
-    --delay=<seconds>   Optional: delay after each network request (default: 1)
+    --delay=<seconds>   Optional: delay after each network request (default: 0)
                         Requests served from the cache do not wait.
-                        Increase if hitting rate limits
+                        Without it, the scan slows down by itself when less
+                        than 20 % of the rate limit is left, and it waits for
+                        the reset when the limit is used up.
 
     --alternativePaths[=regex]
                         Optional: also check the dependency files in the
@@ -344,10 +353,14 @@ gh_cached() {
     fi
 
     # Retry a network error (no HTTP status, e.g. "connection reset") or a 5xx
-    # up to 3 times. Other HTTP errors (404, rate limit, authentication) do
-    # not change on retry.
-    local output status attempt
-    for attempt in 1 2 3 4; do
+    # up to 3 times. Other HTTP errors (404, authentication) do not change on
+    # retry. At the rate limit, wait and send the request again.
+    local output status attempt=0 limit_waits=0 bucket
+    bucket=$(rate_bucket "$@")
+    while true; do
+        attempt=$((attempt + 1))
+        pace_requests "$bucket"
+
         # One dot per network request shows progress during slow requests.
         if [[ -t 2 ]]; then
             printf '.' >&2
@@ -357,20 +370,38 @@ gh_cached() {
         local started=$SECONDS
         output=$(gh "$@" 2>&1) || status=$?
         echo "network" >> "$REQUEST_LOG"
+        printf '.' >> "$RATE_COUNTER"
         local http
         http=$(http_status "$output")
         log INFO "gh $* -> exit $status${http:+ (HTTP $http)}, $((SECONDS - started)) s, attempt $attempt"
-        # Rate limiting delay
-        sleep "$DELAY"
+        if [[ "$DELAY" != "0" ]]; then
+            sleep "$DELAY"
+        fi
 
-        if [[ $status -eq 0 || $attempt -eq 4 ]] || ! is_retryable_error "$output"; then
+        if [[ $status -eq 0 ]]; then
             break
         fi
-        log WARN "Retry in $((attempt * 2)) s: ${output##*$'\n'}"
         # A red "x" replaces the dot of the failed attempt.
         if [[ -t 2 ]]; then
             printf '\b%sx%s' "$RED" "$NC" >&2
         fi
+        if is_rate_limited "$output" && [[ $limit_waits -lt 5 ]]; then
+            limit_waits=$((limit_waits + 1))
+            attempt=$((attempt - 1))
+            if [[ "$output" == *"secondary rate limit"* ]]; then
+                # GitHub: wait at least one minute, then longer.
+                wait_until "$(($(date +%s) + 60 * limit_waits))" "Secondary rate limit"
+            else
+                check_rate_limit
+                wait_until "$(rate_value "$bucket" 4)" "Rate limit used up"
+                check_rate_limit
+            fi
+            continue
+        fi
+        if [[ $attempt -ge 4 ]] || ! is_retryable_error "$output"; then
+            break
+        fi
+        log WARN "Retry in $((attempt * 2)) s: ${output##*$'\n'}"
         sleep $((attempt * 2))
     done
 
@@ -520,6 +551,122 @@ http_status() {
         fi
     done <<< "$1"
     echo "$status"
+}
+
+# The rate limit bucket of a gh call: GraphQL ("api graphql", "repo view")
+# or REST ("core").
+rate_bucket() {
+    if [[ "$1" == "repo" || "${2:-}" == "graphql" ]]; then
+        echo "graphql"
+    else
+        echo "core"
+    fi
+}
+
+# The network requests of all scans in this directory (see RATE_COUNTER).
+# Short option: BSD wc (macOS) has no --bytes.
+network_requests() {
+    if [[ -f "$RATE_COUNTER" ]]; then
+        echo $(($(wc -c < "$RATE_COUNTER")))
+    else
+        echo 0
+    fi
+}
+
+# Store the rate limits in RATE_FILE. "gh api rate_limit" does not count.
+check_rate_limit() {
+    if [[ $OFFLINE -eq 1 ]]; then
+        return 0
+    fi
+    local limits requests
+    limits=$(gh api rate_limit --jq '
+        "core \(.resources.core.remaining) \(.resources.core.limit) \(.resources.core.reset)",
+        "graphql \(.resources.graphql.remaining) \(.resources.graphql.limit) \(.resources.graphql.reset)"' 2>/dev/null) || return 0
+    requests=$(network_requests)
+    # Written at once (rename): another scan may read it now.
+    write_cache_entry "$RATE_FILE" "$(echo "$limits" | awk -v requests="$requests" '{ print $0, requests }')"
+    log INFO "Rate limit: $(echo "$limits" | awk '{ printf "%s %s of %s; ", $1, $2, $3 }')"
+}
+
+# Field $2 of the rate limit of bucket $1: 2 remaining, 3 limit, 4 reset,
+# 5 network requests at the check.
+rate_value() {
+    awk -v bucket="$1" -v field="$2" '$1 == bucket { print $field }' "$RATE_FILE" 2>/dev/null
+}
+
+# "Rate limit: REST 4941 of 5000, GraphQL 4990 of 5000, resets at 00:01:06"
+rate_limit_summary() {
+    if [[ ! -s "$RATE_FILE" ]]; then
+        echo "Rate limit: unknown"
+        return
+    fi
+    echo "Rate limit: REST $(rate_value core 2) of $(rate_value core 3), GraphQL $(rate_value graphql 2) of $(rate_value graphql 3), resets at $(format_clock "$(rate_value core 4)")"
+}
+
+format_clock() {
+    jq --null-input --raw-output --argjson time "$1" '$time | strflocaltime("%H:%M:%S")'
+}
+
+# Wait until epoch second $1, with a countdown. $2: the reason (for the log).
+wait_until() {
+    local until="$1" now
+    if [[ $until -le $(date +%s) ]]; then
+        return 0
+    fi
+    log WARN "$2: waiting until $(format_clock "$until")"
+    if [[ $PROGRESS_SHOWN -eq 1 && -t 2 ]]; then
+        echo "" >&2
+    fi
+    while now=$(date +%s); [[ $now -lt $until ]]; do
+        if [[ -t 2 ]]; then
+            printf '\r\033[K%s%s: waiting %s, until %s%s' "$YELLOW" "$2" "$(format_age $((until - now)))" "$(format_clock "$until")" "$NC" >&2
+        fi
+        sleep 1
+    done
+    if [[ -t 2 ]]; then
+        printf '\r\033[K' >&2
+    fi
+}
+
+# Before a network request: wait for the reset if the limit is used up.
+# With less than 20 % left, spread the rest evenly until the reset.
+pace_requests() {
+    if [[ $OFFLINE -eq 1 || ! -s "${RATE_FILE:-}" ]]; then
+        return 0
+    fi
+    local requests checked
+    requests=$(network_requests)
+    checked=$(rate_value "$1" 5)
+    if [[ -z "$checked" ]]; then
+        return 0
+    fi
+    if [[ $((requests - checked)) -ge $RATE_CHECK_EVERY ]]; then
+        check_rate_limit
+        checked=$(rate_value "$1" 5)
+    fi
+    local remaining limit reset now left
+    remaining=$(rate_value "$1" 2)
+    limit=$(rate_value "$1" 3)
+    reset=$(rate_value "$1" 4)
+    now=$(date +%s)
+    left=$((remaining - (requests - checked)))
+    if [[ $left -le 0 ]]; then
+        wait_until "$reset" "Rate limit used up"
+        check_rate_limit
+    elif [[ $((left * 5)) -lt $limit && $reset -gt $now ]]; then
+        log DEBUG "Rate limit: $left of $limit left, $(((reset - now) / left)) s per request until the reset"
+        sleep $(((reset - now) / left))
+    fi
+}
+
+# GitHub refused the request because of the (primary or secondary) rate limit.
+is_rate_limited() {
+    if [[ "$1" == *RATE_LIMITED* ]]; then
+        return 0
+    fi
+    local status
+    status=$(http_status "$1")
+    [[ ( "$status" == "403" || "$status" == "429" ) && "$1" == *[Rr]"ate limit"* ]]
 }
 
 # A GraphQL error has an "errors" list. Without an HTTP status and without
@@ -1901,6 +2048,10 @@ print_results() {
     else
         echo "  - Requests served from the cache: 0 of $requests"
     fi
+    if [[ $OFFLINE -eq 0 ]]; then
+        check_rate_limit
+        echo "  - $(rate_limit_summary)"
+    fi
     local complete="complete"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         complete="NOT complete"
@@ -1940,6 +2091,7 @@ main() {
     parse_args "$@"
 
     REQUEST_LOG=$(mktemp)
+    mkdir -p "$LOCK_DIR"
     trap 'rm -f "$REQUEST_LOG"; remove_temp_files; remove_own_locks' EXIT
     remove_temp_files
 
@@ -1984,6 +2136,10 @@ main() {
         print_info "Using the cache in $CACHE_DIR. Delete entries there or use --no-cache to fetch again."
     else
         print_info "Not reading the cache (--no-cache). New responses are written to $CACHE_DIR."
+    fi
+    if [[ $OFFLINE -eq 0 ]]; then
+        check_rate_limit
+        print_info "$(rate_limit_summary)"
     fi
 
     log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE offline=$OFFLINE delay=$DELAY"
