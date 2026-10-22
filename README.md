@@ -73,7 +73,8 @@ Options:
   --below <version>   Optional: find packages below this major version
                       (default: find all repos that have the package)
   --branch <name>     Optional: specific branch to check (default: repo's default)
-  --delay <seconds>   Optional: delay between API requests (default: 1)
+  --delay <seconds>   Optional: delay after each network request (default: 1);
+                      requests served from the cache do not wait
   --alternativePaths <path1[,path2,...]>
                       Optional: directories to search for the dependency file
                       if it is not in the repository root, in this order
