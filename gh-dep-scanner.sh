@@ -24,6 +24,7 @@ BOLD=$'\033[1m'
 DELAY=1
 BRANCH=""
 ALTERNATIVE_PATHS=""
+SHOW_VISIBILITY=0
 URL=""
 REPO=""
 TYPE=""
@@ -32,7 +33,6 @@ BELOW_VERSION=""
 
 # Results arrays
 declare -a RESULT_URLS=()
-declare -a RESULT_NAMES=()
 declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
 declare -a RESULT_STATUS=()
@@ -93,6 +93,9 @@ ${BOLD}OPTIONS:${NC}
                         file if it is not in the repository root.
                         They are tried in the given order.
                         Example: app,src/web
+
+    --show-visibility   Optional: add a column with the repository
+                        visibility (public/private)
 
     -v, --verbose       Print each command before it runs (set -x)
 
@@ -227,6 +230,10 @@ parse_args() {
             --alternativePaths)
                 ALTERNATIVE_PATHS="$2"
                 shift 2
+                ;;
+            --show-visibility)
+                SHOW_VISIBILITY=1
+                shift
                 ;;
             -v|--verbose)
                 set -x
@@ -645,7 +652,6 @@ scan_repos() {
 
         # Store results
         RESULT_URLS+=("$repo_url")
-        RESULT_NAMES+=("$repo_name")
         RESULT_VERSIONS+=("$version_str")
         RESULT_VISIBILITY+=("$visibility")
         RESULT_STATUS+=("$status")
@@ -663,6 +669,15 @@ scan_repos() {
 # OUTPUT
 #===============================================================================
 
+# Arguments: color, URL, version, visibility
+print_row() {
+    if [[ $SHOW_VISIBILITY -eq 1 ]]; then
+        printf "%s%-55s %-15s %-10s%s\n" "$1" "$2" "$3" "$4" "$NC"
+    else
+        printf "%s%-55s %s%s\n" "$1" "$2" "$3" "$NC"
+    fi
+}
+
 print_results() {
     local dep_file_name
     dep_file_name=$(dep_file_names)
@@ -674,8 +689,8 @@ print_results() {
     echo ""
 
     # Print header
-    printf "${BOLD}%-55s %-20s %-15s %-10s${NC}\n" "REPO URL" "NAME" "VERSION" "VISIBILITY"
-    printf "%-55s %-20s %-15s %-10s\n" "--------" "----" "-------" "----------"
+    print_row "$BOLD" "REPO URL" "VERSION" "VISIBILITY"
+    print_row "" "--------" "-------" "----------"
 
     local has_results=0
 
@@ -694,7 +709,6 @@ print_results() {
     for i in $ordered_rows; do
         local status="${RESULT_STATUS[$i]}"
         local url="${RESULT_URLS[$i]}"
-        local name="${RESULT_NAMES[$i]}"
         local version="${RESULT_VERSIONS[$i]}"
         local visibility="${RESULT_VISIBILITY[$i]}"
 
@@ -713,18 +727,18 @@ print_results() {
 
         # Repos at or above the version do not count as results.
         if [[ "$status" == "below" ]]; then
-            printf "${RED}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
+            print_row "$RED" "$url" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "ok" ]]; then
-            printf "${GREEN}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$version" "$visibility"
         elif [[ "$status" == "found" ]]; then
-            printf "${GREEN}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            printf "${YELLOW}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
+            print_row "$YELLOW" "$url" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            printf "${CYAN}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
+            print_row "$CYAN" "$url" "$version" "$visibility"
             has_results=1
         fi
     done

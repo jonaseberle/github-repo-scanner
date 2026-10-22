@@ -23,7 +23,7 @@ This script fills that gap.
 - Interactive mode or CLI flags for automation
 - Rate limiting to avoid GitHub API limits
 - Colored output with progress indicator
-- Shows repo visibility (public/private)
+- Shows repo visibility (public/private) with `--show-visibility`
 - Handles missing dependency files gracefully
 
 ## Requirements
@@ -76,6 +76,7 @@ Options:
   --alternativePaths <path1[,path2,...]>
                       Optional: directories to search for the dependency file
                       if it is not in the repository root, in this order
+  --show-visibility   Optional: add a column with the repo visibility
   -v, --verbose       Print each command before it runs (set -x)
   --help              Show help message
 ```
@@ -195,18 +196,18 @@ The repository root is searched first, then `app`, then `src/web`.
 Scanning YOUR_ORG repositories for livewire/livewire < 4...
 Branch: default
 
-REPO URL                                          NAME              VERSION      VISIBILITY
---------                                          ----              -------      ----------
+REPO URL                                                VERSION
+--------                                                -------
 
 VERSION BELOW
-https://github.com/YOUR_ORG/project-alpha         project-alpha     ^3.2         private
-https://github.com/YOUR_ORG/marketing-site        marketing-site    ~3.1.0       public
+https://github.com/YOUR_ORG/project-alpha               ^3.2
+https://github.com/YOUR_ORG/marketing-site              ~3.1.0
 
 VERSION ABOVE
-https://github.com/YOUR_ORG/shop-backend          shop-backend      ^4.0         private
+https://github.com/YOUR_ORG/shop-backend                ^4.0
 
 N/A
-https://github.com/YOUR_ORG/client-portal         client-portal     N/A          private
+https://github.com/YOUR_ORG/client-portal               N/A
 
 ================================================================================
 Summary:
