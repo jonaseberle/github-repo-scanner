@@ -25,6 +25,8 @@ DELAY=1
 BRANCH=""
 ALTERNATIVE_PATHS=""
 SHOW_VISIBILITY=0
+CACHE_DIR="./var/cache"
+USE_CACHE=1
 URL=""
 REPO=""
 TYPE=""
@@ -99,6 +101,10 @@ ${BOLD}OPTIONS:${NC}
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
 
+    --no-cache          Optional: do not read the cache in ./var/cache.
+                        New responses are still written to it.
+                        To fetch one request again, delete its entry there.
+
     -v, --verbose       Print each command before it runs (set -x)
 
     --help              Show this help message
@@ -163,6 +169,44 @@ dep_file_names() {
     esac
 }
 
+# Run "gh <arguments>" and cache the output in $CACHE_DIR/<key>.
+# The key is the request, e.g. "api/orgs/NAME".
+# A 404 is cached as <key>.404. Other errors are not cached.
+gh_cached() {
+    local file="$CACHE_DIR/$1"
+    shift
+
+    if [[ $USE_CACHE -eq 1 && -f "$file" ]]; then
+        cat "$file"
+        return 0
+    fi
+    if [[ $USE_CACHE -eq 1 && -f "$file.404" ]]; then
+        cat "$file.404"
+        return 1
+    fi
+
+    local output status=0
+    output=$(gh "$@" 2>&1) || status=$?
+
+    if [[ $status -eq 0 ]]; then
+        write_cache_entry "$file" "$output"
+        rm -f "$file.404"
+    elif [[ "$output" == *"(HTTP 404)"* ]]; then
+        write_cache_entry "$file.404" "$output"
+        rm -f "$file"
+    fi
+    printf '%s\n' "$output"
+    return $status
+}
+
+# Short options only: BSD mkdir and mv (macOS) have no long options.
+write_cache_entry() {
+    mkdir -p "$(dirname "$1")"
+    # Write to a temporary file first: an interrupted scan must not leave a partial entry.
+    printf '%s' "$2" >| "$1.tmp.$$"
+    mv -f "$1.tmp.$$" "$1"
+}
+
 #===============================================================================
 # PREREQUISITES CHECK
 #===============================================================================
@@ -176,8 +220,9 @@ check_prerequisites() {
         echo "  Install it from: https://cli.github.com/"
         missing=1
     else
-        # Check if gh is authenticated
-        if ! gh auth status &> /dev/null; then
+        # Check if gh is authenticated.
+        # "gh auth token" reads the local login only. "gh auth status" needs the network.
+        if ! gh auth token &> /dev/null; then
             print_error "GitHub CLI is not authenticated."
             echo "  Run: gh auth login"
             missing=1
@@ -235,6 +280,10 @@ parse_args() {
                 ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
+                shift
+                ;;
+            --no-cache)
+                USE_CACHE=0
                 shift
                 ;;
             -v|--verbose)
@@ -352,7 +401,7 @@ parse_github_url() {
     if [[ "$url" =~ github\.com/([^/?]+)$ ]]; then
         OWNER="${BASH_REMATCH[1]}"
         # Try to determine if it's an org or user
-        if gh api "orgs/$OWNER" &> /dev/null; then
+        if gh_cached "api/orgs/$OWNER" api "orgs/$OWNER" &> /dev/null; then
             OWNER_TYPE="org"
         else
             OWNER_TYPE="user"
@@ -387,17 +436,17 @@ fetch_repos() {
     local repos_json
     if [[ "$OWNER_TYPE" == "repo" ]]; then
         # Wrap in an array to get the same shape as "gh repo list".
-        repos_json=$(gh repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef --jq '[.]' 2>&1) || {
+        repos_json=$(gh_cached "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef --jq '[.]') || {
             print_error "Failed to fetch repository: $OWNER/$REPO"
             exit 1
         }
     elif [[ "$OWNER_TYPE" == "org" ]]; then
-        repos_json=$(gh repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef 2>&1) || {
+        repos_json=$(gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef) || {
             print_error "Failed to fetch repositories for organization: $OWNER"
             exit 1
         }
     else
-        repos_json=$(gh repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef 2>&1) || {
+        repos_json=$(gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef) || {
             print_error "Failed to fetch repositories for user: $OWNER"
             exit 1
         }
@@ -440,7 +489,9 @@ fetch_dependency_file() {
     for path in "${paths[@]}"; do
         path="${path%/}"
         for dep_file in $dep_files; do
-            response=$(gh api --header "Accept: application/vnd.github.raw+json" "repos/$OWNER/$repo_name/contents/${path:+$path/}$dep_file?ref=$branch" 2>&1) && break 2
+            # Encode "/" in the branch name: else the cache entry becomes a directory.
+            local request="repos/$OWNER/$repo_name/contents/${path:+$path/}$dep_file?ref=${branch//\//%2F}"
+            response=$(gh_cached "api/$request" api --header "Accept: application/vnd.github.raw+json" "$request") && break 2
             # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
             if [[ "$response" != *"(HTTP 404)"* ]]; then
                 print_error "Failed to fetch ${path:+$path/}$dep_file from $OWNER/$repo_name: $response"
@@ -812,6 +863,12 @@ main() {
     if [[ -n "$BELOW_VERSION" && ! "$BELOW_VERSION" =~ ^[0-9]+$ ]]; then
         print_error "Version must be a number (major version)."
         exit 1
+    fi
+
+    if [[ $USE_CACHE -eq 1 ]]; then
+        print_info "Using the cache in $CACHE_DIR. Delete entries there or use --no-cache to fetch again."
+    else
+        print_info "Not reading the cache (--no-cache). New responses are written to $CACHE_DIR."
     fi
 
     # Parse the GitHub URL
