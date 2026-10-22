@@ -19,6 +19,7 @@ This script fills that gap.
 - Scans all repositories in a GitHub organization or personal account (archived repositories are skipped)
 - Supports **Composer** (PHP) and **Node** (JavaScript) dependencies
 - Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type composerJson`)
+- Reads the installed Node version from `package-lock.json` or `yarn.lock` (or the constraint from `package.json` with `--type nodeJson`)
 - Interactive mode or CLI flags for automation
 - Rate limiting to avoid GitHub API limits
 - Colored output with progress indicator
@@ -52,7 +53,7 @@ Simply run the script without arguments:
 
 You'll be prompted for:
 1. GitHub URL (org, personal or a single repository)
-2. Dependency type (composer/node/composerJson)
+2. Dependency type (composer/node/composerJson/nodeJson)
 3. Package name
 4. Minimum version to check against (optional)
 5. Branch (optional)
@@ -65,7 +66,8 @@ You'll be prompted for:
 Options:
   --url <url>         GitHub URL (org or personal repos page, or one repo)
   --type <type>       Dependency type: "composer" (composer.lock), "composerJson"
-                      (composer.json) or "node" (package.json)
+                      (composer.json), "node" (package-lock.json or yarn.lock)
+                      or "nodeJson" (package.json)
   --package <name>    Package name to search for
   --below <version>   Optional: find packages below this major version
                       (default: find all repos that have the package)
@@ -211,7 +213,7 @@ Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOV
 | Color | Meaning |
 |-------|---------|
 | Red | Package found below target version |
-| Yellow | No dependency file (composer.lock/composer.json/package.json) |
+| Yellow | No dependency file (composer.lock/composer.json/package-lock.json/yarn.lock/package.json) |
 | Cyan | Dependency file exists but package not found |
 | Green | Package found at or above target version (or found at all, without `--below`) |
 
@@ -248,7 +250,8 @@ The script extracts the major version from common constraint formats:
 - Only scans the root dependency file, or the first one found in `--alternativePaths` (not all monorepo subdirectories)
 - Compares major versions only (not minor/patch)
 - Maximum ~1000 repos per scan (GitHub API limit)
-- Reads `package.json`, not `package-lock.json`
+- Does not read `pnpm-lock.yaml`
+- In `yarn.lock`, uses the first entry for the package if there are several versions
 
 ## License
 

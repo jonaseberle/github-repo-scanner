@@ -71,7 +71,9 @@ ${BOLD}OPTIONS:${NC}
     --type <type>       Dependency type:
                           composer      installed version from composer.lock
                           composerJson  version constraint from composer.json
-                          node          version constraint from package.json
+                          node          installed version from package-lock.json
+                                        or yarn.lock
+                          nodeJson      version constraint from package.json
 
     --package <name>    Package name to search for
                         Examples: livewire/livewire, laravel/framework, react
@@ -146,10 +148,12 @@ print_progress() {
     echo -ne "\r${CYAN}$1${NC}"
 }
 
-dep_file_name() {
+# Space-separated, in the order they are tried.
+dep_file_names() {
     case "$TYPE" in
         composer) echo "composer.lock" ;;
         composerJson) echo "composer.json" ;;
+        node) echo "package-lock.json yarn.lock" ;;
         *) echo "package.json" ;;
     esac
 }
@@ -266,15 +270,17 @@ interactive_mode() {
     if [[ -z "$TYPE" ]]; then
         echo -e "${CYAN}Select dependency type:${NC}"
         echo "  1) composer (PHP - composer.lock, installed version)"
-        echo "  2) node (JavaScript - package.json)"
+        echo "  2) node (JavaScript - package-lock.json or yarn.lock, installed version)"
         echo "  3) composerJson (PHP - composer.json, version constraint)"
+        echo "  4) nodeJson (JavaScript - package.json, version constraint)"
         read -r -p "> " type_choice
         case $type_choice in
             1|composer) TYPE="composer" ;;
             2|node) TYPE="node" ;;
             3|composerJson) TYPE="composerJson" ;;
+            4|nodeJson) TYPE="nodeJson" ;;
             *)
-                print_error "Invalid choice. Please enter 1, 2, 3, 'composer', 'node', or 'composerJson'."
+                print_error "Invalid choice. Please enter 1, 2, 3, 4, 'composer', 'node', 'composerJson', or 'nodeJson'."
                 exit 1
                 ;;
         esac
@@ -284,7 +290,7 @@ interactive_mode() {
     # Package
     if [[ -z "$PACKAGE" ]]; then
         echo -e "${CYAN}Enter package name:${NC}"
-        if [[ "$TYPE" != "node" ]]; then
+        if [[ "$TYPE" != node* ]]; then
             echo "  Example: livewire/livewire, laravel/framework"
         else
             echo "  Example: react, vue, lodash"
@@ -406,8 +412,8 @@ fetch_repos() {
 fetch_dependency_file() {
     local repo_name="$1"
     local branch="$2"
-    local dep_file
-    dep_file=$(dep_file_name)
+    local dep_file dep_files
+    dep_files=$(dep_file_names)
 
     # The leading comma adds the repository root as the first path.
     local -a paths
@@ -418,13 +424,15 @@ fetch_dependency_file() {
     local path response
     for path in "${paths[@]}"; do
         path="${path%/}"
-        response=$(gh api --header "Accept: application/vnd.github.raw+json" "repos/$OWNER/$repo_name/contents/${path:+$path/}$dep_file?ref=$branch" 2>&1) && break
-        # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
-        if [[ "$response" != *"(HTTP 404)"* ]]; then
-            print_error "Failed to fetch ${path:+$path/}$dep_file from $OWNER/$repo_name: $response"
-            exit 1
-        fi
-        response=""
+        for dep_file in $dep_files; do
+            response=$(gh api --header "Accept: application/vnd.github.raw+json" "repos/$OWNER/$repo_name/contents/${path:+$path/}$dep_file?ref=$branch" 2>&1) && break 2
+            # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
+            if [[ "$response" != *"(HTTP 404)"* ]]; then
+                print_error "Failed to fetch ${path:+$path/}$dep_file from $OWNER/$repo_name: $response"
+                exit 1
+            fi
+            response=""
+        done
     done
 
     if [[ -z "$response" ]]; then
@@ -432,7 +440,8 @@ fetch_dependency_file() {
         return
     fi
 
-    if echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
+    # yarn.lock is not JSON.
+    if [[ "$dep_file" != *.json ]] || echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
         echo "$response"
     else
         echo "PARSE_ERROR"
@@ -456,6 +465,32 @@ extract_version() {
     elif [[ "$dep_type" == "composerJson" ]]; then
         # Check in require first, then require-dev
         version=$(echo "$json_content" | jq -r --arg pkg "$package" '.require[$pkg] // .["require-dev"][$pkg] // empty' 2>/dev/null)
+    elif [[ "$dep_type" == "node" && "$json_content" == "{"* ]]; then
+        # package-lock.json: "packages" since lockfileVersion 2, "dependencies" in version 1.
+        # Use the top-level node_modules entry: nested ones belong to other packages.
+        version=$(echo "$json_content" | jq -r --arg pkg "$package" '.packages["node_modules/" + $pkg].version // .dependencies[$pkg].version // empty' 2>/dev/null)
+    elif [[ "$dep_type" == "node" ]]; then
+        # yarn.lock (classic and berry): take the version of the first entry for the package.
+        version=$(echo "$json_content" | awk -v pkg="$package" '
+            /^[^ #]/ {
+                in_entry = 0
+                line = $0
+                sub(/:$/, "", line)
+                n = split(line, specs, /, */)
+                for (i = 1; i <= n; i++) {
+                    spec = specs[i]
+                    gsub(/"/, "", spec)
+                    if (index(spec, pkg "@") == 1) in_entry = 1
+                }
+                next
+            }
+            in_entry && /^  version:? / {
+                version = $2
+                gsub(/"/, "", version)
+                print version
+                exit
+            }
+        ')
     else
         # Check in dependencies first, then devDependencies
         version=$(echo "$json_content" | jq -r --arg pkg "$package" '.dependencies[$pkg] // .devDependencies[$pkg] // empty' 2>/dev/null)
@@ -630,7 +665,8 @@ scan_repos() {
 
 print_results() {
     local dep_file_name
-    dep_file_name=$(dep_file_name)
+    dep_file_name=$(dep_file_names)
+    dep_file_name="${dep_file_name// / or }"
 
     echo ""
     echo -e "${BOLD}Results: $PACKAGE in repositories${BELOW_VERSION:+ (target version: $BELOW_VERSION)}${NC}"
@@ -734,8 +770,8 @@ main() {
         exit 1
     fi
 
-    if [[ "$TYPE" != "composer" && "$TYPE" != "composerJson" && "$TYPE" != "node" ]]; then
-        print_error "Type must be 'composer', 'composerJson' or 'node'."
+    if [[ "$TYPE" != "composer" && "$TYPE" != "composerJson" && "$TYPE" != "node" && "$TYPE" != "nodeJson" ]]; then
+        print_error "Type must be 'composer', 'composerJson', 'node' or 'nodeJson'."
         exit 1
     fi
 
