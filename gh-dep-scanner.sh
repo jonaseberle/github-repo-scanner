@@ -219,6 +219,19 @@ gh_cached() {
     return $status
 }
 
+# Encode the characters that have a meaning in a URL ("/" stays).
+# Branch names can contain "#": unencoded, GitHub ignores the rest of the request.
+url_encode() {
+    local s="$1"
+    s="${s//\%/%25}"
+    s="${s//\#/%23}"
+    s="${s//\&/%26}"
+    s="${s//+/%2B}"
+    s="${s//\?/%3F}"
+    s="${s// /%20}"
+    echo "$s"
+}
+
 # GNU stat first, then BSD stat (macOS).
 file_mtime() {
     stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"
@@ -255,7 +268,9 @@ remove_temp_files() {
 
 # Short options only: BSD mkdir and mv (macOS) have no long options.
 write_cache_entry() {
-    mkdir -p "$(dirname "$1")"
+    # This fails if a file has the name of the directory, e.g. for a branch
+    # "release" that was replaced by "release/x". Then do not cache.
+    mkdir -p "$(dirname "$1")" 2>/dev/null || return 0
     # Write to a temporary file first: an interrupted scan must not leave a partial entry.
     printf '%s' "$2" >| "$1.tmp.$$"
     mv -f "$1.tmp.$$" "$1"
@@ -549,12 +564,17 @@ fetch_dependency_file() {
 
     # Fetch file content from GitHub API.
     # Use the raw media type: the JSON response has no content for files over 1 MB (e.g. composer.lock).
+    # A "/" in the branch name stays: the cache gets a directory per prefix (e.g. feat/).
+    local ref
+    ref=$(url_encode "$branch")
+
     local path response
     for path in "${paths[@]}"; do
         path="${path%/}"
         for dep_file in $dep_files; do
-            # Encode "/" in the branch name: else the cache entry becomes a directory.
-            local request="repos/$OWNER/$repo_name/contents/${path:+$path/}$dep_file?ref=${branch//\//%2F}"
+            local file_path request
+            file_path=$(url_encode "${path:+$path/}$dep_file")
+            request="repos/$OWNER/$repo_name/contents/$file_path?ref=$ref"
             response=$(gh_cached "api/$request" api --header "Accept: application/vnd.github.raw+json" "$request") && break 2
             # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
             if [[ "$response" != *"(HTTP 404)"* ]]; then
@@ -809,7 +829,11 @@ scan_repos() {
 
             # Store results
             # With --branches, a row is a branch: link to it.
-            RESULT_URLS+=("$repo_url${BRANCHES:+/tree/$target_branch}")
+            local row_url="$repo_url"
+            if [[ -n "$BRANCHES" ]]; then
+                row_url="$repo_url/tree/$(url_encode "$target_branch")"
+            fi
+            RESULT_URLS+=("$row_url")
             RESULT_VERSIONS+=("$version_str")
             RESULT_VISIBILITY+=("$visibility")
             RESULT_STATUS+=("$status")
