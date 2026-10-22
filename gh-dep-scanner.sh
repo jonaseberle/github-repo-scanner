@@ -1143,6 +1143,7 @@ fetch_repo_list() {
 
 # Delete the cache entries of each repository that are older than its last
 # push. Entries written after the push stay, also those of a parallel scan.
+# Entries below commit/ stay: a commit never changes.
 refresh_pushed_repos() {
     local name pushed_at dir stamp outdated reference
     reference=$(mktemp)
@@ -1156,9 +1157,9 @@ refresh_pushed_repos() {
         stamp="${stamp%Z}"
         TZ=UTC touch -t "${stamp:0:12}.${stamp:12:2}" "$reference"
         # Short option: BSD wc (macOS) has no --lines.
-        outdated=$(find "$dir" -type f ! -newer "$reference" | wc -l)
+        outdated=$(find "$dir" -path "$dir/commit" -prune -o -type f ! -newer "$reference" -print | wc -l)
         if [[ $outdated -gt 0 ]]; then
-            find "$dir" -type f ! -newer "$reference" -exec rm -f {} +
+            find "$dir" -path "$dir/commit" -prune -o -type f ! -newer "$reference" -exec rm -f {} +
             REFRESHED_COUNT=$((REFRESHED_COUNT + 1))
             log INFO "Cache of $OWNER/$name: $((outdated)) entries older than the push at $pushed_at removed"
         fi
@@ -1170,11 +1171,11 @@ refresh_pushed_repos() {
 # DEPENDENCY FILE FETCHING
 #===============================================================================
 
-# Fetch the dependency file in directory $3 ("." is the root).
+# Fetch the dependency file in directory $3 ("." is the root) of commit $2.
 # For --type=node, try package-lock.json first, then yarn.lock.
 fetch_dependency_file() {
     local repo_name="$1"
-    local branch="$2"
+    local commit="$2"
     local dir="$3"
     local dep_file dep_files
     dep_files=$(dep_file_names)
@@ -1186,16 +1187,13 @@ fetch_dependency_file() {
 
     # Fetch file content from GitHub API.
     # Use the raw media type: the JSON response has no content for files over 1 MB (e.g. composer.lock).
-    local ref
-    ref=$(url_encode "$branch")
-
     local response=""
     for dep_file in $dep_files; do
         local file_path request
         file_path=$(url_encode "$prefix$dep_file")
-        request="repos/$OWNER/$repo_name/contents/$file_path?ref=$ref"
-        # Cache by branch first: all files of a branch are in one directory.
-        local key="api/repos/$OWNER/$repo_name/ref/$branch/$prefix$dep_file"
+        request="repos/$OWNER/$repo_name/contents/$file_path?ref=$commit"
+        # Cache by commit: a commit never changes, so the entry never gets old.
+        local key="api/repos/$OWNER/$repo_name/commit/$commit/$prefix$dep_file"
         response=$(gh_cached "$key" api --header "Accept: application/vnd.github.raw+json" "$request") && break
         # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
         if [[ "$(http_status "$response")" != "404" ]]; then
@@ -1218,26 +1216,25 @@ fetch_dependency_file() {
     fi
 }
 
-# Print the directories of a branch that contain a dependency file, one per
+# Print the directories of commit $2 that contain a dependency file, one per
 # line: the root (".") and those that match --alternativePaths.
-# Uses the file list of the branch: one request, also for many directories.
+# Uses the file list of the commit: one request, also for many directories.
 matching_dirs() {
     local repo_name="$1"
-    local branch="$2"
-    local ref listing
-    ref=$(url_encode "$branch")
-    local request="repos/$OWNER/$repo_name/git/trees/$ref?recursive=1"
-    listing=$(gh_cached "api/repos/$OWNER/$repo_name/ref/$branch/tree?recursive=1" api "$request" \
+    local commit="$2"
+    local listing
+    local request="repos/$OWNER/$repo_name/git/trees/$commit?recursive=1"
+    listing=$(gh_cached "api/repos/$OWNER/$repo_name/commit/$commit/tree?recursive=1" api "$request" \
         --jq '(if .truncated then "TRUNCATED" else empty end), (.tree[] | select(.type == "blob") | .path)') || {
         # Only a 404 means "no files" (e.g. an empty repository). Other errors must stop the scan.
         if [[ "$(http_status "$listing")" == "404" ]]; then
             return 0
         fi
-        print_error "Failed to fetch the file list of $OWNER/$repo_name ($branch): $listing"
+        print_error "Failed to fetch the file list of $OWNER/$repo_name ($commit): $listing"
         exit 1
     }
     if [[ "$listing" == TRUNCATED* ]]; then
-        print_warning_line "The file list of $OWNER/$repo_name ($branch) is incomplete (too many files). Some directories are not checked."
+        print_warning_line "The file list of $OWNER/$repo_name ($commit) is incomplete (too many files). Some directories are not checked."
     fi
 
     local dir
@@ -1460,16 +1457,17 @@ is_affected() {
     [[ $group -gt 0 && $group_holds -eq 1 ]]
 }
 
-# Print the branches of a repository that match --branches, one per line.
-# With --hide-merged, a branch that is fully merged into the default branch
-# ($2) is printed as "merged<TAB>name".
+# Print the branches of a repository that match --branches with their
+# commit, "name<TAB>commit", one per line. With --hide-merged, a branch that is
+# fully merged into the default branch ($2) is printed as "merged<TAB>name".
 matching_branches() {
     local listing
     if [[ $HIDE_MERGED -eq 1 ]]; then
         listing=$(branches_with_merge_state "$1" "$2")
     else
         local request="repos/$OWNER/$1/branches?per_page=100"
-        listing=$(gh_cached "api/$request" api --paginate "$request" --jq '.[].name') || {
+        # "-": no merge state. Not an empty field: read joins adjacent tabs.
+        listing=$(gh_cached "api/$request&heads" api --paginate "$request" --jq '.[] | "\(.name)\t-\t\(.commit.sha)"') || {
             # Only a 404 means "no branches". Other errors must stop the scan.
             if [[ "$(http_status "$listing")" == "404" ]]; then
                 return 0
@@ -1480,8 +1478,8 @@ matching_branches() {
     fi
 
     # Branch names contain no spaces, tabs or glob characters.
-    local name behind
-    while IFS=$'\t' read -r name behind; do
+    local name behind commit
+    while IFS=$'\t' read -r name behind commit; do
         if [[ -z "$name" || ! "$name" =~ $BRANCHES ]]; then
             continue
         fi
@@ -1489,14 +1487,14 @@ matching_branches() {
         if [[ "$behind" == "0" && "$name" != "$2" ]]; then
             printf 'merged\t%s\n' "$name"
         else
-            echo "$name"
+            printf '%s\t%s\n' "$name" "$commit"
         fi
     done <<< "$listing"
 }
 
-# Print "name<TAB>commits that are not in the default branch ($2)" for all
-# branches of repository $1. One GraphQL request per 100 branches, instead
-# of one comparison per branch.
+# Print "name<TAB>commits that are not in the default branch ($2)<TAB>commit"
+# for all branches of repository $1. One GraphQL request per 100 branches,
+# instead of one comparison per branch.
 branches_with_merge_state() {
     # $owner, $name, $base and $endCursor are GraphQL variables, not shell ones.
     # shellcheck disable=SC2016
@@ -1504,18 +1502,36 @@ branches_with_merge_state() {
         repository(owner: $owner, name: $name) {
             refs(refPrefix: "refs/heads/", first: 100, after: $endCursor) {
                 pageInfo { hasNextPage endCursor }
-                nodes { name compare(headRef: $base) { behindBy } }
+                nodes { name target { oid } compare(headRef: $base) { behindBy } }
             }
         }
     }'
     local listing
-    listing=$(gh_cached "api/repos/$OWNER/$1/branches?merged-into=$2" api graphql --paginate \
+    listing=$(gh_cached "api/repos/$OWNER/$1/branches?merged-into=$2&heads" api graphql --paginate \
         -f owner="$OWNER" -f name="$1" -f base="$2" -f query="$query" \
-        --jq '.data.repository.refs.nodes[] | "\(.name)\t\(.compare.behindBy // "")"') || {
+        --jq '.data.repository.refs.nodes[] | "\(.name)\t\(.compare.behindBy // "-")\t\(.target.oid)"') || {
         print_error "Failed to fetch the branches of $OWNER/$1: $listing"
         exit 1
     }
     echo "$listing"
+}
+
+# Print the commit of branch $2 in repository $1, or nothing if there is no
+# such branch (e.g. an empty repository).
+branch_commit() {
+    # "gh repo view" gives an empty repository no default branch name.
+    if [[ -z "$2" ]]; then
+        return 0
+    fi
+    local commit
+    commit=$(gh_cached "api/repos/$OWNER/$1/branches/$2" api "repos/$OWNER/$1/branches/$(url_encode "$2")" --jq '.commit.sha') || {
+        if [[ "$(http_status "$commit")" == "404" ]]; then
+            return 0
+        fi
+        print_error "Failed to fetch the branch $2 of $OWNER/$1: $commit"
+        exit 1
+    }
+    echo "$commit"
 }
 
 #===============================================================================
@@ -1645,7 +1661,7 @@ scan_repos() {
             listing=$(matching_branches "$repo_name" "$default_branch")
             merged=$(echo "$listing" | awk -F '\t' '$1 == "merged"' | awk 'END { print NR }')
             MERGED_COUNT=$((MERGED_COUNT + merged))
-            branches=$(echo "$listing" | awk -F '\t' 'NF == 1')
+            branches=$(echo "$listing" | awk -F '\t' '$1 != "merged"')
             log INFO "Branches of $repo_name: $(echo "$branches" | awk 'NF > 0 { n++ } END { print n + 0 }') matching, $merged merged and hidden"
             if [[ -z "$branches" ]]; then
                 # Only merged branches match: they are counted as merged.
@@ -1655,14 +1671,20 @@ scan_repos() {
                 continue
             fi
         else
-            branches="${BRANCH:-$default_branch}"
+            # An assignment of its own: an error of branch_commit must stop the scan.
+            local default_commit
+            target_branch="${BRANCH:-$default_branch}"
+            default_commit=$(branch_commit "$repo_name" "$target_branch")
+            branches=$(printf '%s\t%s' "$target_branch" "$default_commit")
         fi
 
-        local branch_count=0 branch_number=0
-        for target_branch in $branches; do
-            branch_count=$((branch_count + 1))
-        done
-        for target_branch in $branches; do
+        # One line per branch: "name<TAB>commit".
+        local branch_count branch_number=0 commit
+        branch_count=$(echo "$branches" | awk 'NF > 0 { n++ } END { print n + 0 }')
+        while IFS=$'\t' read -r target_branch commit; do
+            if [[ -z "$target_branch" ]]; then
+                continue
+            fi
             BRANCHES_SCANNED=$((BRANCHES_SCANNED + 1))
             branch_number=$((branch_number + 1))
 
@@ -1673,10 +1695,16 @@ scan_repos() {
                 print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS)"
             fi
 
+            # No commit: no such branch, e.g. an empty repository.
+            if [[ -z "$commit" ]]; then
+                record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
+                continue
+            fi
+
             # One row per directory with a dependency file.
             local dirs dir
             if [[ -n "$ALTERNATIVE_PATHS" ]]; then
-                dirs=$(matching_dirs "$repo_name" "$target_branch")
+                dirs=$(matching_dirs "$repo_name" "$commit")
                 if [[ -z "$dirs" ]]; then
                     record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
                     continue
@@ -1686,7 +1714,7 @@ scan_repos() {
             fi
             while IFS= read -r dir; do
                 local content
-                content=$(fetch_dependency_file "$repo_name" "$target_branch" "$dir")
+                content=$(fetch_dependency_file "$repo_name" "$commit" "$dir")
                 # Without --alternativePaths, there is no PATH column.
                 if [[ "$content" == "NOT_FOUND" ]]; then
                     record_file "$repo_url" "$target_branch" "" "$visibility" "$content"
@@ -1694,7 +1722,7 @@ scan_repos() {
                     record_file "$repo_url" "$target_branch" "$dir" "$visibility" "$content"
                 fi
             done <<< "$dirs"
-        done
+        done <<< "$branches"
 
     done < <(echo "$REPOS_DATA" | jq -c '.[]')
     trap - INT
