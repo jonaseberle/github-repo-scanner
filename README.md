@@ -179,6 +179,16 @@ The repository root is searched first, then `app`, then `src/web`.
   --alternativePaths app,src/web
 ```
 
+### Check the constraint in package.json instead of the installed version
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/USERNAME" \
+  --type nodeJson \
+  --package react \
+  --below 18
+```
+
 ## Sample Output
 
 ```
