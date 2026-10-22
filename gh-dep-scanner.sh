@@ -31,6 +31,9 @@ DELAY=1
 BRANCH=""
 BRANCHES=""
 HIDE_MERGED=0
+# --hide-unknown: no VERSION FILE NOT FOUND rows. --hide-absent: also no PACKAGE NOT FOUND rows.
+HIDE_UNKNOWN=0
+HIDE_ABSENT=0
 ALTERNATIVE_PATHS=""
 REPO_FILTER=""
 SHOW_VISIBILITY=0
@@ -130,6 +133,12 @@ ${BOLD}OPTIONS:${NC}
                         Without a regex: check all branches.
                         Examples: --branches='^feat/|^upgrade/'
                                   --branches=typo3 --branches='upgrade$'
+
+    --hide-unknown      Optional: hide the rows without a dependency file
+                        (VERSION FILE NOT FOUND)
+
+    --hide-absent       Optional: also hide the rows without a matching package
+                        (PACKAGE NOT FOUND)
 
     --hide-merged       Optional, with --branches: hide the branches that are
                         fully merged into the default branch (one request per
@@ -476,6 +485,13 @@ parse_args() {
                 ;;
             --hide-merged)
                 HIDE_MERGED=1
+                ;;
+            --hide-unknown)
+                HIDE_UNKNOWN=1
+                ;;
+            --hide-absent)
+                HIDE_UNKNOWN=1
+                HIDE_ABSENT=1
                 ;;
             --no-cache)
                 USE_CACHE=0
@@ -1492,6 +1508,10 @@ print_results() {
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
     local ordered_rows="" wanted_status i
     for wanted_status in affected not_affected found not_in_file no_file error; do
+        # The summary still counts the hidden rows.
+        if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
+            continue
+        fi
         for i in $sorted_rows; do
             if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" ]]; then
                 ordered_rows+=" $i"
@@ -1586,8 +1606,15 @@ print_results() {
     else
         echo -e "  - Packages found: ${GREEN}$FOUND_COUNT${NC}"
     fi
-    echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}"
-    echo -e "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}"
+    local unknown_note="" absent_note=""
+    if [[ $HIDE_UNKNOWN -eq 1 ]]; then
+        unknown_note=" (hidden)"
+    fi
+    if [[ $HIDE_ABSENT -eq 1 ]]; then
+        absent_note=" (hidden)"
+    fi
+    echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
+    echo -e "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}$absent_note"
 
     local requests cache_hits oldest
     read -r requests cache_hits oldest <<< "$(awk '
