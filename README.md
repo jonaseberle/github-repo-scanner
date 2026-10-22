@@ -262,6 +262,7 @@ Summary:
   - Repos with livewire/livewire below v4: 2
   - Repos without composer.lock: 5
   - Repos without livewire/livewire in dependencies: 10
+  - Requests served from the cache: 24 of 26 (oldest entry: 2d 3h old)
 ```
 
 ### Output Legend
