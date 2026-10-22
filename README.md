@@ -116,6 +116,19 @@ Options:
   --delay 2
 ```
 
+### Debug a scan
+
+`--verbose` prints each command before it runs.
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/orgs/YOUR_ORG/repositories" \
+  --type composer \
+  --package livewire/livewire \
+  --below 4 \
+  --verbose
+```
+
 ## Sample Output
 
 ```
