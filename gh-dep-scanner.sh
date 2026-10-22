@@ -25,6 +25,7 @@ DELAY=1
 BRANCH=""
 BRANCHES=""
 ALTERNATIVE_PATHS=""
+REPO_FILTER=""
 SHOW_VISIBILITY=0
 CACHE_DIR="./var/cache"
 USE_CACHE=1
@@ -53,6 +54,7 @@ NO_FILE_COUNT=0
 NOT_FOUND_COUNT=0
 BRANCHES_SCANNED=0
 NO_BRANCH_COUNT=0
+FILTERED_OUT_COUNT=0
 # Stays empty for a single repository.
 ARCHIVED_COUNT=""
 
@@ -95,6 +97,10 @@ ${BOLD}OPTIONS:${NC}
     --below=<version>   Optional: find packages below this major version
                         Default: find all repos that have the package
                         Example: 4 (finds all packages with major version < 4)
+
+    --repo=<regex>      Optional: check only the repositories whose name (without
+                        the owner) matches this extended regular expression
+                        Examples: --repo='^typo3-', --repo='\.de$'
 
     --branch=<name>     Optional: specific branch to check
                         Default: repository's default branch
@@ -349,6 +355,9 @@ parse_args() {
             --below=*)
                 BELOW_VERSION="${1#*=}"
                 ;;
+            --repo=*)
+                REPO_FILTER="${1#*=}"
+                ;;
             --branch=*)
                 BRANCH="${1#*=}"
                 ;;
@@ -378,7 +387,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--package|--below|--branch|--delay|--alternativePaths)
+            --url|--type|--package|--below|--repo|--branch|--delay|--alternativePaths)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;
@@ -550,11 +559,28 @@ fetch_repos() {
         repos_json=$(echo "$repos_json" | jq '[.[] | select(.isArchived | not)]')
     fi
 
+    # Filter with bash, not jq: jq regular expressions are not POSIX extended ones.
+    if [[ -n "$REPO_FILTER" ]]; then
+        local name matching=""
+        while IFS= read -r name; do
+            if [[ "$name" =~ $REPO_FILTER ]]; then
+                matching+="$name"$'\n'
+            else
+                FILTERED_OUT_COUNT=$((FILTERED_OUT_COUNT + 1))
+            fi
+        done < <(echo "$repos_json" | jq -r '.[].name')
+        repos_json=$(echo "$repos_json" | jq --arg names "$matching" '($names | split("\n")) as $names | [.[] | select(.name as $name | any($names[]; . == $name))]')
+    fi
+
     REPOS_DATA="$repos_json"
     TOTAL_REPOS=$(echo "$repos_json" | jq 'length')
 
     if [[ "$TOTAL_REPOS" -eq 0 ]]; then
-        print_warning "No repositories found for $OWNER"
+        if [[ -n "$REPO_FILTER" ]]; then
+            print_warning "No repository of $OWNER matches --repo='$REPO_FILTER'"
+        else
+            print_warning "No repositories found for $OWNER"
+        fi
         exit 0
     fi
 
@@ -1052,6 +1078,9 @@ print_results() {
     echo "================================================================================"
     echo -e "${BOLD}Summary:${NC}"
     echo "  - Total repos scanned: $TOTAL_REPOS"
+    if [[ -n "$REPO_FILTER" ]]; then
+        echo "  - Repos not matching --repo: $FILTERED_OUT_COUNT"
+    fi
     if [[ -n "$BRANCHES" ]]; then
         echo "  - Branches scanned: $BRANCHES_SCANNED"
         echo "  - Repos without a matching branch: $NO_BRANCH_COUNT"
@@ -1089,6 +1118,21 @@ print_results() {
 #===============================================================================
 # MAIN
 #===============================================================================
+
+# Stop if the value of option $1 is an invalid extended regular expression.
+check_regex() {
+    if [[ -z "$2" ]]; then
+        return 0
+    fi
+    # Status 2 means an invalid regular expression. We want the status of the condition.
+    local regex_status=0
+    # shellcheck disable=SC2319
+    [[ "" =~ $2 ]] || regex_status=$?
+    if [[ $regex_status -eq 2 ]]; then
+        print_error "Invalid regular expression for $1: $2"
+        exit 1
+    fi
+}
 
 main() {
     # Parse command line arguments
@@ -1132,16 +1176,8 @@ main() {
         exit 1
     fi
 
-    if [[ -n "$BRANCHES" ]]; then
-        # Status 2 means an invalid regular expression. We want the status of the condition.
-        local regex_status=0
-        # shellcheck disable=SC2319
-        [[ "" =~ $BRANCHES ]] || regex_status=$?
-        if [[ $regex_status -eq 2 ]]; then
-            print_error "Invalid regular expression for --branches: $BRANCHES"
-            exit 1
-        fi
-    fi
+    check_regex --branches "$BRANCHES"
+    check_regex --repo "$REPO_FILTER"
 
     if [[ $USE_CACHE -eq 1 ]]; then
         print_info "Using the cache in $CACHE_DIR. Delete entries there or use --no-cache to fetch again."
