@@ -3,7 +3,7 @@
 #===============================================================================
 # GitHub Dependency Scanner
 # Scans all repositories in a GitHub org or personal account to find repos
-# using a specific package below a given version.
+# that use a package in an affected version range.
 #
 # Requirements: gh (GitHub CLI), jq
 # Usage: ./gh-dep-scanner.sh [options] or run interactively
@@ -45,7 +45,11 @@ URL=""
 REPO=""
 TYPE=""
 PACKAGES=""
-BELOW_VERSION=""
+AFFECTED=""
+# --affected, parsed: per condition the group number, the operator and the version.
+declare -a RANGE_GROUPS=()
+declare -a RANGE_OPERATORS=()
+declare -a RANGE_VERSIONS=()
 
 # Results arrays
 declare -a RESULT_URLS=()
@@ -58,7 +62,7 @@ declare -a RESULT_STATUS=()
 
 # Counters
 TOTAL_REPOS=0
-BELOW_COUNT=0
+AFFECTED_COUNT=0
 FOUND_COUNT=0
 NO_FILE_COUNT=0
 NOT_FOUND_COUNT=0
@@ -78,7 +82,7 @@ show_help() {
 ${BOLD}GitHub Dependency Scanner${NC}
 
 Scans all repositories in a GitHub organization or personal account (or a
-single repository) to find repos using a specific package below a given version.
+single repository) to find repos that use a package in an affected version range.
 
 ${BOLD}USAGE:${NC}
     ./gh-dep-scanner.sh [OPTIONS]
@@ -107,9 +111,12 @@ ${BOLD}OPTIONS:${NC}
                         Examples: --packages='^livewire/livewire$',
                                   --packages='^typo3/cms-', --packages=react
 
-    --below=<version>   Optional: find packages below this version
-                        Default: find all repos that have the package
-                        Examples: 4 (finds all packages < 4.0.0), 2.1.3
+    --affected=<ranges> Optional: show which packages are in these version
+                        ranges, in the form of security advisories (e.g. on
+                        packagist.org): "|" separates alternatives, "," joins
+                        conditions. Operators: >=, >, <=, <, =, !=.
+                        Example: --affected='>=13.0.0,<13.3.5|<6.4.5'
+                        Default: show all found packages
 
     --repo=<regex>      Optional: check only the repositories whose name (without
                         the owner) matches this extended regular expression
@@ -154,23 +161,23 @@ ${BOLD}EXAMPLES:${NC}
     # Interactive mode
     ./gh-dep-scanner.sh
 
-    # Find repos with livewire < v4 in an organization
+    # Find repos with livewire < 4 in an organization
     ./gh-dep-scanner.sh --url="https://github.com/orgs/YOUR_ORG/repositories" \\
                         --type=composer \\
                         --packages=livewire/livewire \\
-                        --below=4
+                        --affected='<4'
 
-    # Find repos with react < v18 for a user
+    # Find repos with react < 18 for a user
     ./gh-dep-scanner.sh --url="https://github.com/USERNAME" \\
                         --type=node \\
                         --packages=react \\
-                        --below=18
+                        --affected='<18'
 
     # Specify a branch
     ./gh-dep-scanner.sh --url="https://github.com/orgs/YOUR_ORG/repositories" \\
                         --type=composer \\
                         --packages=laravel/framework \\
-                        --below=10 \\
+                        --affected='<10' \\
                         --branch=develop
 
 ${BOLD}REQUIREMENTS:${NC}
@@ -431,8 +438,12 @@ parse_args() {
                 print_error "--package is now --packages=<regex>, e.g. --packages='^vendor/name\$'."
                 exit 1
                 ;;
-            --below=*)
-                BELOW_VERSION="${1#*=}"
+            --affected=*)
+                AFFECTED="${1#*=}"
+                ;;
+            --below|--below=*)
+                print_error "--below is now --affected=<ranges>, e.g. --affected='<${1#--below=}'."
+                exit 1
                 ;;
             --repo=*)
                 REPO_FILTER="${1#*=}"
@@ -473,7 +484,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--below|--repo|--branch|--delay)
+            --url|--type|--affected|--repo|--branch|--delay)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;
@@ -547,11 +558,11 @@ interactive_mode() {
         fi
     fi
 
-    # Version
-    if [[ -z "$BELOW_VERSION" ]]; then
-        echo -e "${CYAN}Enter minimum version to check against (press Enter to find all repos with the package):${NC}"
-        echo "  Example: 4 (will find all repos with version < 4.0.0), 2.1.3"
-        read -r -p "> " BELOW_VERSION
+    # Affected versions
+    if [[ -z "$AFFECTED" ]]; then
+        echo -e "${CYAN}Enter the affected version ranges (press Enter to show all found packages):${NC}"
+        echo "  Example: <4, >=13.0.0,<13.3.5|<6.4.5"
+        read -r -p "> " AFFECTED
         echo ""
     fi
 
@@ -898,22 +909,76 @@ get_version() {
     fi
 }
 
-is_below_version() {
+# Parse --affected into RANGE_GROUPS, RANGE_OPERATORS and RANGE_VERSIONS.
+# Stop on an invalid range.
+parse_affected() {
+    local -a groups conditions
+    local group condition number=0
+    IFS='|' read -r -a groups <<< "$AFFECTED"
+    for group in ${groups[@]+"${groups[@]}"}; do
+        number=$((number + 1))
+        conditions=()
+        IFS=',' read -r -a conditions <<< "$group"
+        if [[ ${#conditions[@]} -eq 0 ]]; then
+            print_error "Invalid --affected: an empty range in '$AFFECTED'."
+            exit 1
+        fi
+        for condition in "${conditions[@]}"; do
+            condition="${condition// /}"
+            if [[ ! "$condition" =~ ^(\>=|\<=|!=|==|\>|\<|=)?v?([0-9]+(\.[0-9]+)*)$ ]]; then
+                print_error "Invalid --affected: '$condition' (use e.g. >=1.2.3 or <2)."
+                exit 1
+            fi
+            RANGE_GROUPS+=("$number")
+            RANGE_OPERATORS+=("${BASH_REMATCH[1]:-=}")
+            RANGE_VERSIONS+=("$(get_version "${BASH_REMATCH[2]}")")
+        done
+    done
+}
+
+# True if version (constraint) $1 is in one of the --affected ranges:
+# all conditions of at least one group hold.
+is_affected() {
     local -a have wanted
     read -r -a have <<< "$(get_version "$1")"
-    read -r -a wanted <<< "$(get_version "$2")"
 
-    # Compare major, then minor, then patch. "10#": a part like "08" is not octal.
-    local i
-    for i in 0 1 2; do
-        if (( 10#${have[$i]} < 10#${wanted[$i]} )); then
-            return 0  # true, is below
+    local i part comparison group=0 group_holds=0
+    for i in "${!RANGE_OPERATORS[@]}"; do
+        if [[ ${RANGE_GROUPS[$i]} -ne $group ]]; then
+            if [[ $group -gt 0 && $group_holds -eq 1 ]]; then
+                return 0
+            fi
+            group=${RANGE_GROUPS[$i]}
+            group_holds=1
         fi
-        if (( 10#${have[$i]} > 10#${wanted[$i]} )); then
-            return 1  # false, is not below
+        if [[ $group_holds -eq 0 ]]; then
+            continue
         fi
+
+        # Compare major, then minor, then patch. "10#": a part like "08" is not octal.
+        read -r -a wanted <<< "${RANGE_VERSIONS[$i]}"
+        comparison=0
+        for part in 0 1 2; do
+            if (( 10#${have[$part]} < 10#${wanted[$part]} )); then
+                comparison=-1
+                break
+            fi
+            if (( 10#${have[$part]} > 10#${wanted[$part]} )); then
+                comparison=1
+                break
+            fi
+        done
+
+        case "${RANGE_OPERATORS[$i]}" in
+            ">=") [[ $comparison -ge 0 ]] || group_holds=0 ;;
+            ">") [[ $comparison -gt 0 ]] || group_holds=0 ;;
+            "<=") [[ $comparison -le 0 ]] || group_holds=0 ;;
+            "<") [[ $comparison -lt 0 ]] || group_holds=0 ;;
+            "!=") [[ $comparison -ne 0 ]] || group_holds=0 ;;
+            *) [[ $comparison -eq 0 ]] || group_holds=0 ;;
+        esac
     done
-    return 1  # equal is not below
+    [[ $group -gt 0 && $group_holds -eq 1 ]]
 }
 
 # Print the branches of a repository that match --branches, one per line.
@@ -1013,14 +1078,14 @@ record_result() {
         NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
     else
         version_str="$value"
-        if [[ -z "$BELOW_VERSION" ]]; then
+        if [[ -z "$AFFECTED" ]]; then
             status="found"
             FOUND_COUNT=$((FOUND_COUNT + 1))
-        elif is_below_version "$version_str" "$BELOW_VERSION"; then
-            status="below"
-            BELOW_COUNT=$((BELOW_COUNT + 1))
+        elif is_affected "$version_str"; then
+            status="affected"
+            AFFECTED_COUNT=$((AFFECTED_COUNT + 1))
         else
-            status="ok"
+            status="not_affected"
         fi
     fi
 
@@ -1056,7 +1121,7 @@ record_file() {
 
 scan_repos() {
     echo ""
-    echo -e "${BOLD}Scanning $OWNER repositories for ${NC}$(packages_label)${BELOW_VERSION:+ < ${COLOR_VERSION}$BELOW_VERSION${NC}}..."
+    echo -e "${BOLD}Scanning $OWNER repositories for ${NC}$(packages_label)${AFFECTED:+, affected: ${COLOR_VERSION}$AFFECTED${NC}}..."
     if [[ -n "$BRANCHES" ]]; then
         echo -e "Branches: matching ${COLOR_BRANCH}$BRANCHES${NC}"
     elif [[ -n "$BRANCH" ]]; then
@@ -1403,7 +1468,7 @@ print_results() {
     dep_file_name="${dep_file_name// / or }"
 
     echo ""
-    echo -e "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${BELOW_VERSION:+ (target version: ${COLOR_VERSION}$BELOW_VERSION${NC})}"
+    echo -e "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${AFFECTED:+ (affected: ${COLOR_VERSION}$AFFECTED${NC})}"
     echo "================================================================================"
     echo ""
 
@@ -1419,10 +1484,10 @@ print_results() {
     # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
     sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
 
-    # Group the rows: version below, version above (or found), package not found, no file.
+    # Group the rows: affected, not affected (or found), package not found, no file.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
     local ordered_rows="" wanted_status i
-    for wanted_status in below ok found not_in_file no_file error; do
+    for wanted_status in affected not_affected found not_in_file no_file error; do
         for i in $sorted_rows; do
             if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" ]]; then
                 ordered_rows+=" $i"
@@ -1441,8 +1506,8 @@ print_results() {
         local package="${RESULT_PACKAGES[$i]}"
 
         case "$status" in
-            below) row_group="VERSION BELOW" ;;
-            ok) row_group="VERSION ABOVE" ;;
+            affected) row_group="AFFECTED" ;;
+            not_affected) row_group="NOT AFFECTED" ;;
             found) row_group="VERSION FOUND" ;;
             not_in_file) row_group="PACKAGE NOT FOUND" ;;
             *) row_group="N/A" ;;
@@ -1454,10 +1519,10 @@ print_results() {
         fi
 
         # Repos at or above the version do not count as results.
-        if [[ "$status" == "below" ]]; then
+        if [[ "$status" == "affected" ]]; then
             print_row "$RED" "$url" "$branch" "$path" "$package" "$version" "$visibility"
             has_results=1
-        elif [[ "$status" == "ok" ]]; then
+        elif [[ "$status" == "not_affected" ]]; then
             print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
         elif [[ "$status" == "found" ]]; then
             print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
@@ -1478,7 +1543,7 @@ print_results() {
     elif [[ ${#RESULT_STATUS[@]} -eq 0 ]]; then
         echo -e "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
     elif [[ $has_results -eq 0 ]]; then
-        echo -e "${GREEN}All found packages are at version ${COLOR_VERSION}$BELOW_VERSION${NC}${GREEN} or higher.${NC}"
+        echo -e "${GREEN}No found package is affected.${NC}"
     fi
 
     # Summary
@@ -1511,8 +1576,8 @@ print_results() {
         rows="Branches"
     fi
     # A file can give several rows: count packages, not repositories.
-    if [[ -n "$BELOW_VERSION" ]]; then
-        echo -e "  - Packages below ${COLOR_VERSION}$BELOW_VERSION${NC}: ${RED}$BELOW_COUNT${NC}"
+    if [[ -n "$AFFECTED" ]]; then
+        echo -e "  - Packages affected: ${RED}$AFFECTED_COUNT${NC}"
     else
         echo -e "  - Packages found: ${GREEN}$FOUND_COUNT${NC}"
     fi
@@ -1584,10 +1649,7 @@ main() {
     fi
 
 
-    if [[ -n "$BELOW_VERSION" && ! "$BELOW_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
-        print_error "Version must be like 4, 4.1 or 4.1.2."
-        exit 1
-    fi
+    parse_affected
 
     if [[ -n "$BRANCH" && -n "$BRANCHES" ]]; then
         print_error "Use either --branch or --branches."
