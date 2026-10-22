@@ -43,7 +43,7 @@ REQUEST_LOG=""
 URL=""
 REPO=""
 TYPE=""
-PACKAGE=""
+PACKAGES=""
 BELOW_VERSION=""
 
 # Results arrays
@@ -52,6 +52,7 @@ declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
 declare -a RESULT_PATHS=()
 declare -a RESULT_BRANCHES=()
+declare -a RESULT_PACKAGES=()
 declare -a RESULT_STATUS=()
 
 # Counters
@@ -99,8 +100,10 @@ ${BOLD}OPTIONS:${NC}
                                         or yarn.lock
                           nodeJson      version constraint from package.json
 
-    --package=<name>    Package name to search for
-                        Examples: livewire/livewire, laravel/framework, react
+    --packages[=regex]  Packages to search for: an extended regular expression
+                        for the package names. Without a regex: all packages.
+                        Examples: --packages='^livewire/livewire$',
+                                  --packages='^typo3/cms-', --packages=react
 
     --below=<version>   Optional: find packages below this version
                         Default: find all repos that have the package
@@ -148,19 +151,19 @@ ${BOLD}EXAMPLES:${NC}
     # Find repos with livewire < v4 in an organization
     ./gh-dep-scanner.sh --url="https://github.com/orgs/YOUR_ORG/repositories" \\
                         --type=composer \\
-                        --package=livewire/livewire \\
+                        --packages=livewire/livewire \\
                         --below=4
 
     # Find repos with react < v18 for a user
     ./gh-dep-scanner.sh --url="https://github.com/USERNAME" \\
                         --type=node \\
-                        --package=react \\
+                        --packages=react \\
                         --below=18
 
     # Specify a branch
     ./gh-dep-scanner.sh --url="https://github.com/orgs/YOUR_ORG/repositories" \\
                         --type=composer \\
-                        --package=laravel/framework \\
+                        --packages=laravel/framework \\
                         --below=10 \\
                         --branch=develop
 
@@ -411,8 +414,16 @@ parse_args() {
             --type=*)
                 TYPE="${1#*=}"
                 ;;
-            --package=*)
-                PACKAGE="${1#*=}"
+            --packages=*)
+                PACKAGES="${1#*=}"
+                ;;
+            --packages)
+                # Without a value, match all packages.
+                PACKAGES="."
+                ;;
+            --package|--package=*)
+                print_error "--package is now --packages=<regex>, e.g. --packages='^vendor/name\$'."
+                exit 1
                 ;;
             --below=*)
                 BELOW_VERSION="${1#*=}"
@@ -453,7 +464,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--package|--below|--repo|--branch|--delay)
+            --url|--type|--below|--repo|--branch|--delay)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;
@@ -512,16 +523,19 @@ interactive_mode() {
         echo ""
     fi
 
-    # Package
-    if [[ -z "$PACKAGE" ]]; then
-        echo -e "${CYAN}Enter package name:${NC}"
+    # Packages
+    if [[ -z "$PACKAGES" ]]; then
+        echo -e "${CYAN}Enter a regular expression for the package names (press Enter for all packages):${NC}"
         if [[ "$TYPE" != node* ]]; then
-            echo "  Example: livewire/livewire, laravel/framework"
+            echo "  Example: ^livewire/livewire\$, ^typo3/cms-"
         else
-            echo "  Example: react, vue, lodash"
+            echo "  Example: ^react\$, ^@babel/"
         fi
-        read -r -p "> " PACKAGE
+        read -r -p "> " PACKAGES
         echo ""
+        if [[ -z "$PACKAGES" ]]; then
+            PACKAGES="."
+        fi
     fi
 
     # Version
@@ -749,55 +763,75 @@ matching_dirs() {
 # VERSION EXTRACTION
 #===============================================================================
 
-extract_version() {
-    local json_content="$1"
-    local package="$2"
-    local dep_type="$3"
+# "all packages" or "packages matching <regex>", for headers and the summary.
+packages_label() {
+    if [[ "$PACKAGES" == "." ]]; then
+        echo "all packages"
+    else
+        echo "packages matching ${COLOR_PACKAGE}$PACKAGES${NC}"
+    fi
+}
 
-    local version=""
+# Print all packages of a dependency file: "name<TAB>version", one per line.
+# A name that is listed twice (e.g. in require and require-dev) is printed once.
+list_packages() {
+    local content="$1"
+    local dep_type="$2"
 
-    if [[ "$dep_type" == "composer" ]]; then
-        # Check in packages first, then packages-dev
-        version=$(echo "$json_content" | jq -r --arg pkg "$package" 'first((.packages // [])[], (.["packages-dev"] // [])[] | select(.name == $pkg) | .version) // empty' 2>/dev/null)
-    elif [[ "$dep_type" == "composerJson" ]]; then
-        # Check in require first, then require-dev
-        version=$(echo "$json_content" | jq -r --arg pkg "$package" '.require[$pkg] // .["require-dev"][$pkg] // empty' 2>/dev/null)
-    elif [[ "$dep_type" == "node" && "$json_content" == "{"* ]]; then
-        # package-lock.json: "packages" since lockfileVersion 2, "dependencies" in version 1.
-        # Use the top-level node_modules entry: nested ones belong to other packages.
-        version=$(echo "$json_content" | jq -r --arg pkg "$package" '.packages["node_modules/" + $pkg].version // .dependencies[$pkg].version // empty' 2>/dev/null)
-    elif [[ "$dep_type" == "node" ]]; then
-        # yarn.lock (classic and berry): take the version of the first entry for the package.
-        version=$(echo "$json_content" | awk -v pkg="$package" '
-            /^[^ #]/ {
-                in_entry = 0
-                line = $0
-                sub(/:$/, "", line)
-                n = split(line, specs, /, */)
-                for (i = 1; i <= n; i++) {
-                    spec = specs[i]
+    {
+        if [[ "$dep_type" == "composer" ]]; then
+            # packages first, then packages-dev
+            echo "$content" | jq -r '((.packages // []), (.["packages-dev"] // []))[] | "\(.name)\t\(.version)"' 2>/dev/null
+        elif [[ "$dep_type" == "composerJson" ]]; then
+            # require first, then require-dev
+            echo "$content" | jq -r '((.require // {}), (.["require-dev"] // {})) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null
+        elif [[ "$dep_type" == "node" && "$content" == "{"* ]]; then
+            # package-lock.json: "packages" since lockfileVersion 2, "dependencies" in version 1.
+            # Use the top-level node_modules entries: nested ones belong to other packages.
+            echo "$content" | jq -r '
+                if .packages then
+                    .packages | to_entries[]
+                    | select(.key | startswith("node_modules/"))
+                    | (.key | ltrimstr("node_modules/")) as $name
+                    | select($name | contains("node_modules/") | not)
+                    | "\($name)\t\(.value.version)"
+                else
+                    (.dependencies // {}) | to_entries[] | "\(.key)\t\(.value.version)"
+                end' 2>/dev/null
+        elif [[ "$dep_type" == "node" ]]; then
+            # yarn.lock (classic and berry): the version of the first entry for a package.
+            echo "$content" | awk '
+                /^[^ #]/ {
+                    spec = $0
+                    sub(/:$/, "", spec)
+                    sub(/, .*/, "", spec)
                     gsub(/"/, "", spec)
-                    if (index(spec, pkg "@") == 1) in_entry = 1
+                    # The name ends at the "@" of the range; a scoped name starts with "@".
+                    at = index(substr(spec, 2), "@")
+                    name = (at > 0) ? substr(spec, 1, at) : ""
+                    next
                 }
-                next
-            }
-            in_entry && /^  version:? / {
-                version = $2
-                gsub(/"/, "", version)
-                print version
-                exit
-            }
-        ')
-    else
-        # Check in dependencies first, then devDependencies
-        version=$(echo "$json_content" | jq -r --arg pkg "$package" '.dependencies[$pkg] // .devDependencies[$pkg] // empty' 2>/dev/null)
-    fi
+                name != "" && /^  version:? / {
+                    version = $2
+                    gsub(/"/, "", version)
+                    print name "\t" version
+                    name = ""
+                }'
+        else
+            # dependencies first, then devDependencies
+            echo "$content" | jq -r '((.dependencies // {}), (.devDependencies // {})) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null
+        fi
+    } | awk -F '\t' '!seen[$1]++'
+}
 
-    if [[ -z "$version" || "$version" == "null" ]]; then
-        echo "NOT_IN_FILE"
-    else
-        echo "$version"
-    fi
+# Print the packages of a dependency file that match --packages.
+matching_packages() {
+    local name version
+    while IFS=$'\t' read -r name version; do
+        if [[ -n "$name" && "$name" =~ $PACKAGES ]]; then
+            printf '%s\t%s\n' "$name" "$version"
+        fi
+    done < <(list_packages "$1" "$TYPE")
 }
 
 #===============================================================================
@@ -897,40 +931,36 @@ matching_branches() {
 # MAIN SCANNING LOGIC
 #===============================================================================
 
-# Classify the content of a dependency file and add a result row.
-# Arguments: URL, branch, path, visibility, content (or NOT_FOUND / PARSE_ERROR)
+# Classify a package version and add a result row.
+# Arguments: URL, branch, path, visibility, package, and the version or
+# NOT_FOUND (no file) / PARSE_ERROR / NOT_IN_FILE (no matching package).
 record_result() {
-    local content="$5"
+    local value="$6"
 
     local version_str status
 
-    if [[ "$content" == "NOT_FOUND" ]]; then
+    if [[ "$value" == "NOT_FOUND" ]]; then
         version_str="N/A"
         status="no_file"
         NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
-    elif [[ "$content" == "PARSE_ERROR" ]]; then
+    elif [[ "$value" == "PARSE_ERROR" ]]; then
         version_str="Parse error"
         status="error"
         NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
+    elif [[ "$value" == "NOT_IN_FILE" ]]; then
+        version_str="Not found"
+        status="not_in_file"
+        NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
     else
-        # Extract version for the package
-        version_str=$(extract_version "$content" "$PACKAGE" "$TYPE")
-
-        if [[ "$version_str" == "NOT_IN_FILE" ]]; then
-            version_str="Not found"
-            status="not_in_file"
-            NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
-        elif [[ -z "$BELOW_VERSION" ]]; then
+        version_str="$value"
+        if [[ -z "$BELOW_VERSION" ]]; then
             status="found"
             FOUND_COUNT=$((FOUND_COUNT + 1))
+        elif is_below_version "$version_str" "$BELOW_VERSION"; then
+            status="below"
+            BELOW_COUNT=$((BELOW_COUNT + 1))
         else
-            # Check if below target version
-            if is_below_version "$version_str" "$BELOW_VERSION"; then
-                status="below"
-                BELOW_COUNT=$((BELOW_COUNT + 1))
-            else
-                status="ok"
-            fi
+            status="ok"
         fi
     fi
 
@@ -938,14 +968,35 @@ record_result() {
     RESULT_BRANCHES+=("$2")
     RESULT_PATHS+=("$3")
     RESULT_VISIBILITY+=("$4")
+    RESULT_PACKAGES+=("$5")
     RESULT_VERSIONS+=("$version_str")
     RESULT_STATUS+=("$status")
+}
+
+# Add one result row per matching package of a dependency file.
+# Arguments: URL, branch, path, visibility, content (or NOT_FOUND / PARSE_ERROR)
+record_file() {
+    local content="$5"
+    if [[ "$content" == "NOT_FOUND" || "$content" == "PARSE_ERROR" ]]; then
+        record_result "$1" "$2" "$3" "$4" "" "$content"
+        return
+    fi
+
+    local packages name version
+    packages=$(matching_packages "$content")
+    if [[ -z "$packages" ]]; then
+        record_result "$1" "$2" "$3" "$4" "" "NOT_IN_FILE"
+        return
+    fi
+    while IFS=$'\t' read -r name version; do
+        record_result "$1" "$2" "$3" "$4" "$name" "$version"
+    done <<< "$packages"
 }
 
 
 scan_repos() {
     echo ""
-    echo -e "${BOLD}Scanning $OWNER repositories for ${NC}${COLOR_PACKAGE}$PACKAGE${NC}${BELOW_VERSION:+ < ${COLOR_VERSION}$BELOW_VERSION${NC}}..."
+    echo -e "${BOLD}Scanning $OWNER repositories for ${NC}$(packages_label)${BELOW_VERSION:+ < ${COLOR_VERSION}$BELOW_VERSION${NC}}..."
     if [[ -n "$BRANCHES" ]]; then
         echo -e "Branches: matching ${COLOR_BRANCH}$BRANCHES${NC}"
     elif [[ -n "$BRANCH" ]]; then
@@ -1006,7 +1057,7 @@ scan_repos() {
             if [[ -n "$ALTERNATIVE_PATHS" ]]; then
                 dirs=$(matching_dirs "$repo_name" "$target_branch")
                 if [[ -z "$dirs" ]]; then
-                    record_result "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
+                    record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
                     continue
                 fi
             else
@@ -1017,9 +1068,9 @@ scan_repos() {
                 content=$(fetch_dependency_file "$repo_name" "$target_branch" "$dir")
                 # Without --alternativePaths, there is no PATH column.
                 if [[ "$content" == "NOT_FOUND" ]]; then
-                    record_result "$repo_url" "$target_branch" "" "$visibility" "$content"
+                    record_file "$repo_url" "$target_branch" "" "$visibility" "$content"
                 else
-                    record_result "$repo_url" "$target_branch" "$dir" "$visibility" "$content"
+                    record_file "$repo_url" "$target_branch" "$dir" "$visibility" "$content"
                 fi
             done <<< "$dirs"
         done
@@ -1106,13 +1157,14 @@ URL_COLUMN_WIDTH=55
 VERSION_COLUMN_WIDTH=15
 PATH_COLUMN_WIDTH=4
 BRANCH_COLUMN_WIDTH=6
+PACKAGE_COLUMN_WIDTH=7
 
 # Fit the columns to the longest values and to the terminal width.
-# If the row is too wide, shrink in this order: branch and path (they wrap
-# after a "/"), then the version (it wraps at spaces), then the URL (it gets
+# If the row is too wide, shrink in this order: branch, path and package
+# (they wrap after a "/"), then the version (it wraps at spaces), then the URL (it gets
 # its own line, because a URL never wraps).
 set_column_widths() {
-    local i url_width=8 version_width=7 path_width=0 branch_width=0
+    local i url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
     for i in "${!RESULT_URLS[@]}"; do
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
@@ -1126,11 +1178,14 @@ set_column_widths() {
         if show_branch_column && [[ ${#RESULT_BRANCHES[$i]} -gt $branch_width ]]; then
             branch_width=${#RESULT_BRANCHES[$i]}
         fi
+        if [[ ${#RESULT_PACKAGES[$i]} -gt $package_width ]]; then
+            package_width=${#RESULT_PACKAGES[$i]}
+        fi
     done
 
     # Space for the cells: the terminal width minus the gaps and the visibility.
     # Keep the last column free: some terminals wrap a line that fills it.
-    local available=$((TERM_COLUMNS - 2))
+    local available=$((TERM_COLUMNS - 3))
     if show_path_column; then
         available=$((available - 1))
         if [[ $path_width -lt 4 ]]; then
@@ -1147,7 +1202,7 @@ set_column_widths() {
         available=$((available - 11))
     fi
 
-    local over=$((url_width + branch_width + path_width + version_width - available))
+    local over=$((url_width + branch_width + path_width + package_width + version_width - available))
     local cut
     if [[ $over -gt 0 && $branch_width -gt 12 ]]; then
         cut=$((branch_width - 12 < over ? branch_width - 12 : over))
@@ -1157,6 +1212,11 @@ set_column_widths() {
     if [[ $over -gt 0 && $path_width -gt 12 ]]; then
         cut=$((path_width - 12 < over ? path_width - 12 : over))
         path_width=$((path_width - cut))
+        over=$((over - cut))
+    fi
+    if [[ $over -gt 0 && $package_width -gt 12 ]]; then
+        cut=$((package_width - 12 < over ? package_width - 12 : over))
+        package_width=$((package_width - cut))
         over=$((over - cut))
     fi
     if [[ $over -gt 0 && $version_width -gt 10 ]]; then
@@ -1173,6 +1233,7 @@ set_column_widths() {
     VERSION_COLUMN_WIDTH=$version_width
     PATH_COLUMN_WIDTH=$path_width
     BRANCH_COLUMN_WIDTH=$branch_width
+    PACKAGE_COLUMN_WIDTH=$package_width
 }
 
 # The BRANCH column: only with --branches.
@@ -1185,12 +1246,12 @@ show_path_column() {
     [[ -n "$ALTERNATIVE_PATHS" ]]
 }
 
-# Arguments: color, URL, branch, path, version, visibility
-# A branch, path or version that is too wide wraps and stays in its column.
+# Arguments: color, URL, branch, path, package, version, visibility
+# A branch, path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
 print_row() {
-    local -a url_lines=("$2") branch_lines=() path_lines=() version_lines=()
+    local -a url_lines=("$2") branch_lines=() path_lines=() package_lines=() version_lines=()
     local line
     if [[ ${#2} -gt $URL_COLUMN_WIDTH ]]; then
         printf "%s%s%s\n" "$1" "$2" "$NC"
@@ -1207,8 +1268,11 @@ print_row() {
         done < <(wrap_path "$PATH_COLUMN_WIDTH" "$4")
     fi
     while IFS= read -r line; do
+        package_lines+=("$line")
+    done < <(wrap_path "$PACKAGE_COLUMN_WIDTH" "$5")
+    while IFS= read -r line; do
         version_lines+=("$line")
-    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$5")
+    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$6")
 
     local count=${#url_lines[@]}
     if show_branch_column && [[ ${#branch_lines[@]} -gt $count ]]; then
@@ -1217,16 +1281,19 @@ print_row() {
     if show_path_column && [[ ${#path_lines[@]} -gt $count ]]; then
         count=${#path_lines[@]}
     fi
+    if [[ ${#package_lines[@]} -gt $count ]]; then
+        count=${#package_lines[@]}
+    fi
     if [[ ${#version_lines[@]} -gt $count ]]; then
         count=${#version_lines[@]}
     fi
 
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
-    local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH"
+    local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
     local version_color="$COLOR_VERSION" visibility_color="$COLOR_VISIBILITY"
     if [[ -z "$1" || "$1" == "$BOLD" ]]; then
-        branch_color="$1" path_color="$1" version_color="$1" visibility_color="$1"
+        branch_color="$1" path_color="$1" package_color="$1" version_color="$1" visibility_color="$1"
     fi
 
     # Pad first, then color: the color codes have no width.
@@ -1242,11 +1309,15 @@ print_row() {
             printf -v cell "%-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
             row+=" $path_color$cell$NC"
         fi
+        # Color the text only: an underline must not run over the padding.
+        local package_text="${package_lines[$i]:-}"
+        printf -v cell "%-*s" "$PACKAGE_COLUMN_WIDTH" ""
+        row+=" $package_color$package_text$NC${cell:${#package_text}}"
         if [[ $SHOW_VISIBILITY -eq 1 ]]; then
             printf -v cell "%-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
             row+=" $version_color$cell$NC"
             if [[ $i -eq 0 ]]; then
-                row+=" $visibility_color$6$NC"
+                row+=" $visibility_color$7$NC"
             fi
         else
             row+=" $version_color${version_lines[$i]:-}$NC"
@@ -1261,20 +1332,20 @@ print_results() {
     dep_file_name="${dep_file_name// / or }"
 
     echo ""
-    echo -e "${BOLD}Results: ${NC}${COLOR_PACKAGE}$PACKAGE${NC}${BOLD} in repositories${NC}${BELOW_VERSION:+ (target version: ${COLOR_VERSION}$BELOW_VERSION${NC})}"
+    echo -e "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${BELOW_VERSION:+ (target version: ${COLOR_VERSION}$BELOW_VERSION${NC})}"
     echo "================================================================================"
     echo ""
 
     # Print header
     set_column_widths
-    print_row "$BOLD" "REPO URL" "BRANCH" "PATH" "VERSION" "VISIBILITY"
-    print_row "" "--------" "------" "----" "-------" "----------"
+    print_row "$BOLD" "REPO URL" "BRANCH" "PATH" "PACKAGE" "VERSION" "VISIBILITY"
+    print_row "" "--------" "------" "----" "-------" "-------" "----------"
 
     local has_results=0
 
-    # Sort the rows by URL, branch and path. The index is the last field.
+    # Sort the rows by URL, branch, path and package. The index is the last field.
     local sorted_rows
-    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
+    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
 
     # Group the rows: version below, version above (or found), package not found, no file.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
@@ -1295,6 +1366,7 @@ print_results() {
         local visibility="${RESULT_VISIBILITY[$i]}"
         local path="${RESULT_PATHS[$i]}"
         local branch="${RESULT_BRANCHES[$i]}"
+        local package="${RESULT_PACKAGES[$i]}"
 
         case "$status" in
             below) row_group="VERSION BELOW" ;;
@@ -1311,18 +1383,18 @@ print_results() {
 
         # Repos at or above the version do not count as results.
         if [[ "$status" == "below" ]]; then
-            print_row "$RED" "$url" "$branch" "$path" "$version" "$visibility"
+            print_row "$RED" "$url" "$branch" "$path" "$package" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "ok" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$path" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$path" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            print_row "$YELLOW" "$url" "$branch" "$path" "$version" "$visibility"
+            print_row "$YELLOW" "$url" "$branch" "$path" "$package" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            print_row "$CYAN" "$url" "$branch" "$path" "$version" "$visibility"
+            print_row "$CYAN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
             has_results=1
         fi
     done
@@ -1330,7 +1402,7 @@ print_results() {
     if [[ ${#RESULT_URLS[@]} -eq 0 ]]; then
         echo -e "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
     elif [[ $has_results -eq 0 ]]; then
-        echo -e "${GREEN}All repositories have ${COLOR_PACKAGE}$PACKAGE${NC}${GREEN} at version ${COLOR_VERSION}$BELOW_VERSION${NC}${GREEN} or higher!${NC}"
+        echo -e "${GREEN}All found packages are at version ${COLOR_VERSION}$BELOW_VERSION${NC}${GREEN} or higher.${NC}"
     fi
 
     # Summary
@@ -1353,13 +1425,14 @@ print_results() {
     if [[ -n "$BRANCHES" ]]; then
         rows="Branches"
     fi
+    # A file can give several rows: count packages, not repositories.
     if [[ -n "$BELOW_VERSION" ]]; then
-        echo -e "  - $rows with ${COLOR_PACKAGE}$PACKAGE${NC} below ${COLOR_VERSION}$BELOW_VERSION${NC}: ${RED}$BELOW_COUNT${NC}"
+        echo -e "  - Packages below ${COLOR_VERSION}$BELOW_VERSION${NC}: ${RED}$BELOW_COUNT${NC}"
     else
-        echo -e "  - $rows with ${COLOR_PACKAGE}$PACKAGE${NC}: ${GREEN}$FOUND_COUNT${NC}"
+        echo -e "  - Packages found: ${GREEN}$FOUND_COUNT${NC}"
     fi
     echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}"
-    echo -e "  - $rows without ${COLOR_PACKAGE}$PACKAGE${NC} in dependencies: ${CYAN}$NOT_FOUND_COUNT${NC}"
+    echo -e "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}"
 
     local requests cache_hits oldest
     read -r requests cache_hits oldest <<< "$(awk '
@@ -1406,7 +1479,7 @@ main() {
     check_prerequisites
 
     # If required arguments are missing, enter interactive mode
-    if [[ -z "$URL" || -z "$TYPE" || -z "$PACKAGE" ]]; then
+    if [[ -z "$URL" || -z "$TYPE" || -z "$PACKAGES" ]]; then
         interactive_mode
     fi
 
@@ -1421,10 +1494,6 @@ main() {
         exit 1
     fi
 
-    if [[ -z "$PACKAGE" ]]; then
-        print_error "Package name is required."
-        exit 1
-    fi
 
     if [[ -n "$BELOW_VERSION" && ! "$BELOW_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
         print_error "Version must be like 4, 4.1 or 4.1.2."
@@ -1438,6 +1507,7 @@ main() {
 
     check_regex --branches "$BRANCHES"
     check_regex --repo "$REPO_FILTER"
+    check_regex --packages "$PACKAGES"
     check_regex --alternativePaths "$ALTERNATIVE_PATHS"
 
     if [[ $USE_CACHE -eq 1 ]]; then
