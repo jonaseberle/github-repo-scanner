@@ -38,6 +38,9 @@ ALTERNATIVE_PATHS=""
 REPO_FILTER=""
 SHOW_VISIBILITY=0
 CACHE_DIR="./var/cache"
+LOG_FILE="./var/log/gh-dep-scanner.log"
+# At startup, a log of this size or more is cut to its newer half.
+LOG_MAX_BYTES=$((20 * 1024 * 1024))
 USE_CACHE=1
 # Terminal width, for the progress line and the result table.
 TERM_COLUMNS=$(tput cols 2>/dev/null || echo 80)
@@ -196,7 +199,34 @@ ${BOLD}REQUIREMENTS:${NC}
 EOF
 }
 
+# Prepare the log file and keep it below LOG_MAX_BYTES.
+# Short options only: BSD wc, tail and mkdir (macOS) have no long options.
+init_log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    if [[ -f "$LOG_FILE" ]]; then
+        local size
+        size=$(wc -c < "$LOG_FILE")
+        if [[ $size -ge $LOG_MAX_BYTES ]]; then
+            # Drop the first line: the cut can be in the middle of it.
+            tail -c $((size / 2)) "$LOG_FILE" | sed '1d' >| "$LOG_FILE.tmp.$$"
+            mv -f "$LOG_FILE.tmp.$$" "$LOG_FILE"
+            log INFO "Log was $size bytes: cut to the newer half."
+        fi
+    fi
+}
+
+# Arguments: severity (DEBUG, INFO, WARN, ERROR), message.
+# One line per message: timestamp, process id, severity, message.
+log() {
+    local severity="$1"
+    shift
+    local message="$*"
+    message="${message//$'\n'/ }"
+    printf '%s [%s] %-5s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$$" "$severity" "$message" >> "$LOG_FILE"
+}
+
 print_error() {
+    log ERROR "$1"
     # The progress line has no line break at its end.
     if [[ $PROGRESS_SHOWN -eq 1 ]]; then
         echo "" >&2
@@ -206,6 +236,7 @@ print_error() {
 
 # A warning during the scan, on stderr: the caller may capture stdout.
 print_warning_line() {
+    log WARN "$1"
     if [[ $PROGRESS_SHOWN -eq 1 ]]; then
         echo "" >&2
     fi
@@ -264,15 +295,17 @@ dep_file_names() {
 # The key is a path below $CACHE_DIR, e.g. "api/orgs/NAME".
 # A 404 is cached as <key>.404. Other errors are not cached.
 gh_cached() {
-    local file="$CACHE_DIR/$1"
+    local file="$CACHE_DIR/$1" key="$1"
     shift
 
     if [[ $USE_CACHE -eq 1 && -f "$file" ]]; then
+        log DEBUG "cache hit: $key"
         echo "cache $(file_mtime "$file")" >> "$REQUEST_LOG"
         cat "$file"
         return 0
     fi
     if [[ $USE_CACHE -eq 1 && -f "$file.404" ]]; then
+        log DEBUG "cache hit (404): $key"
         echo "cache $(file_mtime "$file.404")" >> "$REQUEST_LOG"
         cat "$file.404"
         return 1
@@ -289,14 +322,19 @@ gh_cached() {
         fi
 
         status=0
+        local started=$SECONDS
         output=$(gh "$@" 2>&1) || status=$?
         echo "network" >> "$REQUEST_LOG"
+        local http
+        http=$(http_status "$output")
+        log INFO "gh $* -> exit $status${http:+ (HTTP $http)}, $((SECONDS - started)) s, attempt $attempt"
         # Rate limiting delay
         sleep "$DELAY"
 
         if [[ $status -eq 0 || $attempt -eq 4 ]] || ! is_retryable_error "$output"; then
             break
         fi
+        log WARN "Retry in $((attempt * 2)) s: ${output##*$'\n'}"
         # A red "x" replaces the dot of the failed attempt.
         if [[ -t 2 ]]; then
             printf '\b%sx%s' "$RED" "$NC" >&2
@@ -307,9 +345,11 @@ gh_cached() {
     if [[ $status -eq 0 ]]; then
         write_cache_entry "$file" "$output"
         rm -f "$file.404"
+        log DEBUG "cache write: $key"
     elif [[ "$(http_status "$output")" == "404" ]]; then
         write_cache_entry "$file.404" "$output"
         rm -f "$file"
+        log DEBUG "cache write (404): $key"
     fi
     printf '%s\n' "$output"
     return $status
@@ -729,6 +769,7 @@ fetch_repos() {
         exit 0
     fi
 
+    log INFO "Repositories of $OWNER_TYPE $OWNER: $TOTAL_REPOS to scan, ${ARCHIVED_COUNT:-0} archived, $FILTERED_OUT_COUNT not matching --repo"
     print_success "Found $TOTAL_REPOS repositories."
 }
 
@@ -1096,6 +1137,7 @@ SCAN_INTERRUPTED=0
 on_scan_interrupt() {
     trap - INT
     SCAN_INTERRUPTED=1
+    log WARN "Interrupted (Ctrl-C) in repo $SCAN_POSITION/$TOTAL_REPOS: printing the results so far."
     echo -ne "\r\033[K"
     PROGRESS_SHOWN=0
     print_results
@@ -1135,6 +1177,7 @@ record_result() {
         fi
     fi
 
+    log DEBUG "Result: $1 branch=$2 path=$3 package=$5 version=$version_str status=$status"
     RESULT_URLS+=("$1")
     RESULT_BRANCHES+=("$2")
     RESULT_PATHS+=("$3")
@@ -1183,6 +1226,7 @@ scan_repos() {
     while IFS= read -r repo_line; do
         i=$((i + 1))
         SCAN_POSITION=$i
+        log INFO "Scanning repo $i/$TOTAL_REPOS: $(echo "$repo_line" | jq -r '.name')"
 
         local repo_name repo_url is_private default_branch
         repo_name=$(echo "$repo_line" | jq -r '.name')
@@ -1207,6 +1251,7 @@ scan_repos() {
             merged=$(echo "$listing" | awk -F '\t' '$1 == "merged"' | awk 'END { print NR }')
             MERGED_COUNT=$((MERGED_COUNT + merged))
             branches=$(echo "$listing" | awk -F '\t' 'NF == 1')
+            log INFO "Branches of $repo_name: $(echo "$branches" | awk 'NF > 0 { n++ } END { print n + 0 }') matching, $merged merged and hidden"
             if [[ -z "$branches" ]]; then
                 # Only merged branches match: they are counted as merged.
                 if [[ -z "$listing" ]]; then
@@ -1653,6 +1698,11 @@ print_results() {
     else
         echo "  - Requests served from the cache: 0 of $requests"
     fi
+    local complete="complete"
+    if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
+        complete="NOT complete"
+    fi
+    log INFO "Done ($complete): ${#RESULT_STATUS[@]} rows, $AFFECTED_COUNT affected, $FOUND_COUNT found, $NO_FILE_COUNT without file, $NOT_FOUND_COUNT without package; $cache_hits of $requests requests from the cache"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         echo ""
         echo -e "${RED}${BOLD}Scanning NOT complete.${NC}"
@@ -1680,6 +1730,9 @@ check_regex() {
 }
 
 main() {
+    init_log
+    log INFO "Start: $0 $*"
+
     # Parse command line arguments
     parse_args "$@"
 
@@ -1729,6 +1782,8 @@ main() {
     else
         print_info "Not reading the cache (--no-cache). New responses are written to $CACHE_DIR."
     fi
+
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"
