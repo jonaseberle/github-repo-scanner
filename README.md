@@ -72,6 +72,8 @@ Options (values only in the form --option=value):
   --package=<name>    Package name to search for
   --below=<version>   Optional: find packages below this major version
                       (default: find all repos that have the package)
+  --repo=<regex>      Optional: only repos whose name matches this extended
+                      regular expression, e.g. --repo='^typo3-'
   --branch=<name>     Optional: specific branch to check (default: repo's default)
   --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a
