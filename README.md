@@ -1,6 +1,6 @@
 # GitHub Dependency Scanner
 
-A bash script that scans all repositories in a GitHub organization or personal account to find which repos use a specific package below a given version.
+A bash script that scans all repositories in a GitHub organization or personal account (or a single repository) to find which repos use a specific package below a given version.
 
 ## Why?
 
@@ -50,7 +50,7 @@ Simply run the script without arguments:
 ```
 
 You'll be prompted for:
-1. GitHub URL (org or personal)
+1. GitHub URL (org, personal or a single repository)
 2. Dependency type (composer/node)
 3. Package name
 4. Minimum version to check against
@@ -127,6 +127,16 @@ Options:
   --package livewire/livewire \
   --below 4 \
   --verbose
+```
+
+### Check a single repository
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/OWNER/REPO" \
+  --type composer \
+  --package laravel/framework \
+  --below 10
 ```
 
 ## Sample Output
