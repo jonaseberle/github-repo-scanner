@@ -19,6 +19,12 @@ BLUE=$'\033[0;34m'
 CYAN=$'\033[0;36m'
 NC=$'\033[0m' # No Color
 BOLD=$'\033[1m'
+# One color per kind of value, wherever it is printed.
+COLOR_BRANCH=$'\033[0;35m'
+COLOR_PATH=$'\033[0;34m'
+COLOR_VERSION=$'\033[1m'
+COLOR_VISIBILITY=$'\033[2m'
+COLOR_PACKAGE=$'\033[4m'
 
 # Default values
 DELAY=1
@@ -195,15 +201,28 @@ print_warning() {
 
 PROGRESS_SHOWN=0
 
+# Arguments: pairs of color and text.
 # Cut the line to the terminal width: a wrapped line is not cleared by "\r".
 # Keep room for the dots of the network requests.
 print_progress() {
     PROGRESS_SHOWN=1
-    local text="$1" max=$((TERM_COLUMNS - 12))
-    if [[ ${#text} -gt $max ]]; then
-        text="${text:0:$((max - 3))}..."
-    fi
-    echo -ne "\r\033[K${CYAN}$text ${NC}"
+    local max=$((TERM_COLUMNS - 12)) used=0 out="" color text keep
+    while [[ $# -ge 2 ]]; do
+        color="$1"
+        text="$2"
+        shift 2
+        if [[ $((used + ${#text})) -gt $max ]]; then
+            keep=$((max - used - 3))
+            if [[ $keep -lt 0 ]]; then
+                keep=0
+            fi
+            out+="$color${text:0:$keep}...$NC"
+            break
+        fi
+        out+="$color$text$NC"
+        used=$((used + ${#text}))
+    done
+    printf '\r\033[K%s ' "$out"
 }
 
 # Space-separated, in the order they are tried.
@@ -926,13 +945,13 @@ record_result() {
 
 scan_repos() {
     echo ""
-    echo -e "${BOLD}Scanning $OWNER repositories for $PACKAGE${BELOW_VERSION:+ < $BELOW_VERSION}...${NC}"
+    echo -e "${BOLD}Scanning $OWNER repositories for ${NC}${COLOR_PACKAGE}$PACKAGE${NC}${BELOW_VERSION:+ < ${COLOR_VERSION}$BELOW_VERSION${NC}}..."
     if [[ -n "$BRANCHES" ]]; then
-        echo -e "Branches: ${CYAN}matching $BRANCHES${NC}"
+        echo -e "Branches: matching ${COLOR_BRANCH}$BRANCHES${NC}"
     elif [[ -n "$BRANCH" ]]; then
-        echo -e "Branch: ${CYAN}$BRANCH${NC}"
+        echo -e "Branch: ${COLOR_BRANCH}$BRANCH${NC}"
     else
-        echo -e "Branch: ${CYAN}default${NC}"
+        echo -e "Branch: ${COLOR_BRANCH}default${NC}"
     fi
     echo ""
 
@@ -957,7 +976,7 @@ scan_repos() {
         # Determine which branches to use
         local branches target_branch
         if [[ -n "$BRANCHES" ]]; then
-            print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name (branches)"
+            print_progress "" "Scanning repo $i/$TOTAL_REPOS: " "$CYAN" "$repo_name" "" " (branches)"
             branches=$(matching_branches "$repo_name")
             if [[ -z "$branches" ]]; then
                 NO_BRANCH_COUNT=$((NO_BRANCH_COUNT + 1))
@@ -976,9 +995,10 @@ scan_repos() {
             branch_number=$((branch_number + 1))
 
             if [[ -n "$BRANCHES" ]]; then
-                print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name, branch $target_branch ($branch_number/$branch_count)"
+                print_progress "" "Scanning repo $i/$TOTAL_REPOS: " "$CYAN" "$repo_name" "" ", branch " \
+                    "$COLOR_BRANCH" "$target_branch" "" " ($branch_number/$branch_count)"
             else
-                print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name"
+                print_progress "" "Scanning repo $i/$TOTAL_REPOS: " "$CYAN" "$repo_name"
             fi
 
             # One row per directory with a dependency file.
@@ -1201,27 +1221,37 @@ print_row() {
         count=${#version_lines[@]}
     fi
 
+    # The URL has the color of the group, the other cells the color of their column.
+    # The header (bold) and the dashes (no color) have one color for all cells.
+    local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH"
+    local version_color="$COLOR_VERSION" visibility_color="$COLOR_VISIBILITY"
+    if [[ -z "$1" || "$1" == "$BOLD" ]]; then
+        branch_color="$1" path_color="$1" version_color="$1" visibility_color="$1"
+    fi
+
+    # Pad first, then color: the color codes have no width.
     local i row cell
     for ((i = 0; i < count; i++)); do
-        printf -v row "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
+        printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
+        row="$1$cell$NC"
         if show_branch_column; then
-            printf -v cell " %-*s" "$BRANCH_COLUMN_WIDTH" "${branch_lines[$i]:-}"
-            row+="$cell"
+            printf -v cell "%-*s" "$BRANCH_COLUMN_WIDTH" "${branch_lines[$i]:-}"
+            row+=" $branch_color$cell$NC"
         fi
         if show_path_column; then
-            printf -v cell " %-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
-            row+="$cell"
+            printf -v cell "%-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
+            row+=" $path_color$cell$NC"
         fi
         if [[ $SHOW_VISIBILITY -eq 1 ]]; then
-            printf -v cell " %-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
-            row+="$cell"
+            printf -v cell "%-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
+            row+=" $version_color$cell$NC"
             if [[ $i -eq 0 ]]; then
-                row+=" $6"
+                row+=" $visibility_color$6$NC"
             fi
         else
-            row+=" ${version_lines[$i]:-}"
+            row+=" $version_color${version_lines[$i]:-}$NC"
         fi
-        printf "%s%s%s\n" "$1" "$row" "$NC"
+        printf "%s\n" "$row"
     done
 }
 
@@ -1231,7 +1261,7 @@ print_results() {
     dep_file_name="${dep_file_name// / or }"
 
     echo ""
-    echo -e "${BOLD}Results: $PACKAGE in repositories${BELOW_VERSION:+ (target version: $BELOW_VERSION)}${NC}"
+    echo -e "${BOLD}Results: ${NC}${COLOR_PACKAGE}$PACKAGE${NC}${BOLD} in repositories${NC}${BELOW_VERSION:+ (target version: ${COLOR_VERSION}$BELOW_VERSION${NC})}"
     echo "================================================================================"
     echo ""
 
@@ -1300,7 +1330,7 @@ print_results() {
     if [[ ${#RESULT_URLS[@]} -eq 0 ]]; then
         echo -e "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
     elif [[ $has_results -eq 0 ]]; then
-        echo -e "${GREEN}All repositories have $PACKAGE at version $BELOW_VERSION or higher!${NC}"
+        echo -e "${GREEN}All repositories have ${COLOR_PACKAGE}$PACKAGE${NC}${GREEN} at version ${COLOR_VERSION}$BELOW_VERSION${NC}${GREEN} or higher!${NC}"
     fi
 
     # Summary
@@ -1324,12 +1354,12 @@ print_results() {
         rows="Branches"
     fi
     if [[ -n "$BELOW_VERSION" ]]; then
-        echo -e "  - $rows with $PACKAGE below v$BELOW_VERSION: ${RED}$BELOW_COUNT${NC}"
+        echo -e "  - $rows with ${COLOR_PACKAGE}$PACKAGE${NC} below ${COLOR_VERSION}$BELOW_VERSION${NC}: ${RED}$BELOW_COUNT${NC}"
     else
-        echo -e "  - $rows with $PACKAGE: ${GREEN}$FOUND_COUNT${NC}"
+        echo -e "  - $rows with ${COLOR_PACKAGE}$PACKAGE${NC}: ${GREEN}$FOUND_COUNT${NC}"
     fi
     echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}"
-    echo -e "  - $rows without $PACKAGE in dependencies: ${CYAN}$NOT_FOUND_COUNT${NC}"
+    echo -e "  - $rows without ${COLOR_PACKAGE}$PACKAGE${NC} in dependencies: ${CYAN}$NOT_FOUND_COUNT${NC}"
 
     local requests cache_hits oldest
     read -r requests cache_hits oldest <<< "$(awk '
