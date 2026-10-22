@@ -234,6 +234,22 @@ format_age() {
     fi
 }
 
+# Remove temporary cache files of this scan and of scans that no longer run.
+# A scan killed between write and rename leaves one behind.
+remove_temp_files() {
+    if [[ ! -d "$CACHE_DIR" ]]; then
+        return 0
+    fi
+    local tmp pid
+    while IFS= read -r tmp; do
+        pid="${tmp##*.tmp.}"
+        # Short option: BSD ps (macOS) has no --pid.
+        if [[ "$pid" == "$$" ]] || ! ps -p "$pid" > /dev/null 2>&1; then
+            rm -f "$tmp"
+        fi
+    done < <(find "$CACHE_DIR" -type f -name '*.tmp.*')
+}
+
 # Short options only: BSD mkdir and mv (macOS) have no long options.
 write_cache_entry() {
     mkdir -p "$(dirname "$1")"
@@ -938,7 +954,8 @@ main() {
     parse_args "$@"
 
     REQUEST_LOG=$(mktemp)
-    trap 'rm -f "$REQUEST_LOG"' EXIT
+    trap 'rm -f "$REQUEST_LOG"; remove_temp_files' EXIT
+    remove_temp_files
 
     # Check prerequisites
     check_prerequisites
