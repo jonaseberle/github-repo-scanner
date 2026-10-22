@@ -193,7 +193,7 @@ dep_file_names() {
 }
 
 # Run "gh <arguments>" and cache the output in $CACHE_DIR/<key>.
-# The key is the request, e.g. "api/orgs/NAME".
+# The key is a path below $CACHE_DIR, e.g. "api/orgs/NAME".
 # A 404 is cached as <key>.404. Other errors are not cached.
 gh_cached() {
     local file="$CACHE_DIR/$1"
@@ -577,7 +577,6 @@ fetch_dependency_file() {
 
     # Fetch file content from GitHub API.
     # Use the raw media type: the JSON response has no content for files over 1 MB (e.g. composer.lock).
-    # A "/" in the branch name stays: the cache gets a directory per prefix (e.g. feat/).
     local ref
     ref=$(url_encode "$branch")
 
@@ -588,7 +587,9 @@ fetch_dependency_file() {
             local file_path request
             file_path=$(url_encode "${path:+$path/}$dep_file")
             request="repos/$OWNER/$repo_name/contents/$file_path?ref=$ref"
-            response=$(gh_cached "api/$request" api --header "Accept: application/vnd.github.raw+json" "$request") && break 2
+            # Cache by branch first: all files of a branch are in one directory.
+            local key="api/repos/$OWNER/$repo_name/ref/$branch/${path:+$path/}$dep_file"
+            response=$(gh_cached "$key" api --header "Accept: application/vnd.github.raw+json" "$request") && break 2
             # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
             if [[ "$response" != *"(HTTP 404)"* ]]; then
                 print_error "Failed to fetch ${path:+$path/}$dep_file from $OWNER/$repo_name: $response"
