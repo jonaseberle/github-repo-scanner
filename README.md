@@ -22,6 +22,7 @@ This script fills that gap.
 - Reads the installed Node version from `package-lock.json` or `yarn.lock` (or the constraint from `package.json` with `--type nodeJson`)
 - Interactive mode or CLI flags for automation
 - Rate limiting to avoid GitHub API limits
+- Caches every GitHub request in `./var/cache`, so a second scan needs no network
 - Colored output with progress indicator
 - Shows repo visibility (public/private) with `--show-visibility`
 - Handles missing dependency files gracefully
@@ -77,6 +78,8 @@ Options:
                       Optional: directories to search for the dependency file
                       if it is not in the repository root, in this order
   --show-visibility   Optional: add a column with the repo visibility
+  --no-cache          Optional: do not read the cache in ./var/cache (new
+                      responses are still written to it)
   -v, --verbose       Print each command before it runs (set -x)
   --help              Show help message
 ```
@@ -199,6 +202,38 @@ The repository root is searched first, then `app`, then `src/web`.
   --package livewire/livewire \
   --show-visibility
 ```
+
+### Fetch everything again
+
+`--no-cache` ignores the cache and replaces its entries with new responses.
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/orgs/YOUR_ORG/repositories" \
+  --type composer \
+  --package livewire/livewire \
+  --no-cache
+```
+
+## Cache
+
+Each GitHub request is cached in `./var/cache` (relative to the current directory). The path of an entry is the request:
+
+```
+var/cache/repo-list/YOUR_ORG                                          gh repo list YOUR_ORG ...
+var/cache/repo-view/OWNER/REPO                                        gh repo view OWNER/REPO ...
+var/cache/api/orgs/NAME                                               gh api orgs/NAME
+var/cache/api/repos/OWNER/REPO/contents/composer.lock?ref=main        gh api repos/OWNER/REPO/contents/composer.lock?ref=main
+var/cache/api/repos/OWNER/REPO/contents/package-lock.json?ref=main.404
+```
+
+- A file that does not exist is cached too, with the suffix `.404`. Once a request is cached, a scan uses only local data.
+- Other errors (rate limit, authentication, network) are not cached.
+- A `/` in a branch name is stored as `%2F`.
+- Entries do not expire. To fetch some requests again, delete their entries, for example:
+  - `rm var/cache/repo-list/YOUR_ORG` to see new repositories
+  - `rm -r var/cache/api/repos/OWNER/REPO` to scan one repository again
+- To fetch everything again, use `--no-cache` or delete `var/cache`.
 
 ## Sample Output
 
