@@ -49,6 +49,14 @@ SCAN_STARTED=$(date +%s)
 LOG_FILE="./var/log/gh-dep-scanner.log"
 # At startup, a log of this size or more is cut to its newer half.
 LOG_MAX_BYTES=$((20 * 1024 * 1024))
+# bash 4.2 and later format the time without "date": no process per log line.
+# bash 3.2 (macOS) runs "date" once per second of $SECONDS; the time can then be up to 1 s late.
+LOG_TIME_BUILTIN=0
+if [[ ${BASH_VERSINFO[0]} -gt 4 || ( ${BASH_VERSINFO[0]} -eq 4 && ${BASH_VERSINFO[1]} -ge 2 ) ]]; then
+    LOG_TIME_BUILTIN=1
+fi
+LOG_TIME=""
+LOG_TIME_SECOND=-1
 USE_CACHE=1
 OFFLINE=0
 # Terminal width, for the progress line and the result table.
@@ -68,10 +76,15 @@ REPO=""
 TYPE=""
 PACKAGES=""
 AFFECTED=""
-# --affected, parsed: per condition the group number, the operator and the version.
+# --affected, parsed: per condition the group number, the operator and the
+# version (major, minor, patch).
 declare -a RANGE_GROUPS=()
 declare -a RANGE_OPERATORS=()
-declare -a RANGE_VERSIONS=()
+declare -a RANGE_MAJORS=()
+declare -a RANGE_MINORS=()
+declare -a RANGE_PATCHES=()
+# Set by parse_version.
+declare -a VERSION=()
 
 # Results arrays
 declare -a RESULT_URLS=()
@@ -246,7 +259,13 @@ log() {
     shift
     local message="$*"
     message="${message//$'\n'/ }"
-    printf '%s [%s] %-5s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$$" "$severity" "$message" >> "$LOG_FILE"
+    if [[ $LOG_TIME_BUILTIN -eq 1 ]]; then
+        printf -v LOG_TIME '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+    elif [[ $SECONDS -ne $LOG_TIME_SECOND ]]; then
+        LOG_TIME=$(date '+%Y-%m-%dT%H:%M:%S%z')
+        LOG_TIME_SECOND=$SECONDS
+    fi
+    printf '%s [%s] %-5s %s\n' "$LOG_TIME" "$$" "$severity" "$message" >> "$LOG_FILE"
 }
 
 print_error() {
@@ -1352,25 +1371,22 @@ matching_packages() {
 # VERSION COMPARISON
 #===============================================================================
 
-# Print the version of a constraint as "major minor patch". A missing part is 0.
-get_version() {
-    local version_constraint="$1"
-
-    # Handle special cases
-    if [[ "$version_constraint" == "*" || "$version_constraint" == "latest" ]]; then
-        echo "0 0 0"
-        return
+# Set VERSION to the version of a constraint: (major minor patch). A missing
+# part is 0. A variable, not output: no subshell for each of many rows.
+parse_version() {
+    local cleaned="$1"
+    VERSION=(0 0 0)
+    if [[ "$cleaned" == "*" || "$cleaned" == "latest" || "$cleaned" == dev-* ]]; then
+        return 0
     fi
 
-    # Handle dev versions
-    if [[ "$version_constraint" =~ ^dev- ]]; then
-        echo "0 0 0"
-        return
-    fi
+    # The first of OR constraints ("^2.0|^3.0", "^2.0 || ^3.0") and of
+    # space-separated ones (">=2.0 <4.0").
+    cleaned="${cleaned%%|*}"
+    cleaned="${cleaned%% *}"
 
-    # Remove common prefixes: ^, ~, >=, >, =, v
     # Quote "~": unquoted, bash expands it to $HOME and nothing is removed.
-    local cleaned="${version_constraint#^}"
+    cleaned="${cleaned#^}"
     cleaned="${cleaned#\~}"
     cleaned="${cleaned#>=}"
     cleaned="${cleaned#>}"
@@ -1379,31 +1395,13 @@ get_version() {
     cleaned="${cleaned#=}"
     cleaned="${cleaned#v}"
 
-    # Handle OR constraints (e.g., "^2.0|^3.0") - take the first one
-    if [[ "$cleaned" == *"|"* ]]; then
-        cleaned="${cleaned%%|*}"
-        cleaned="${cleaned#^}"
-        cleaned="${cleaned#\~}"
-        cleaned="${cleaned#>=}"
-        cleaned="${cleaned#>}"
-        cleaned="${cleaned#=}"
-        cleaned="${cleaned#v}"
-    fi
-
-    # Handle space-separated constraints (e.g., ">=2.0 <4.0") - take the first one
-    if [[ "$cleaned" == *" "* ]]; then
-        cleaned="${cleaned%% *}"
-    fi
-
-    # Extract the version (e.g. "3.*" gives 3 0 0)
+    # "3.*" gives 3 0 0.
     if [[ "$cleaned" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))? ]]; then
-        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[3]:-0} ${BASH_REMATCH[5]:-0}"
-    else
-        echo "0 0 0"
+        VERSION=("${BASH_REMATCH[1]}" "${BASH_REMATCH[3]:-0}" "${BASH_REMATCH[5]:-0}")
     fi
 }
 
-# Parse --affected into RANGE_GROUPS, RANGE_OPERATORS and RANGE_VERSIONS.
+# Parse --affected into the RANGE_* arrays.
 # Stop on an invalid range.
 parse_affected() {
     local -a groups conditions
@@ -1425,7 +1423,11 @@ parse_affected() {
             fi
             RANGE_GROUPS+=("$number")
             RANGE_OPERATORS+=("${BASH_REMATCH[1]:-=}")
-            RANGE_VERSIONS+=("$(get_version "${BASH_REMATCH[2]}")")
+            # After the operator: parse_version changes BASH_REMATCH.
+            parse_version "${BASH_REMATCH[2]}"
+            RANGE_MAJORS+=("${VERSION[0]}")
+            RANGE_MINORS+=("${VERSION[1]}")
+            RANGE_PATCHES+=("${VERSION[2]}")
         done
     done
 }
@@ -1434,7 +1436,8 @@ parse_affected() {
 # all conditions of at least one group hold.
 is_affected() {
     local -a have wanted
-    read -r -a have <<< "$(get_version "$1")"
+    parse_version "$1"
+    have=("${VERSION[@]}")
 
     local i part comparison group=0 group_holds=0
     for i in "${!RANGE_OPERATORS[@]}"; do
@@ -1450,7 +1453,7 @@ is_affected() {
         fi
 
         # Compare major, then minor, then patch. "10#": a part like "08" is not octal.
-        read -r -a wanted <<< "${RANGE_VERSIONS[$i]}"
+        wanted=("${RANGE_MAJORS[$i]}" "${RANGE_MINORS[$i]}" "${RANGE_PATCHES[$i]}")
         comparison=0
         for part in 0 1 2; do
             if (( 10#${have[$part]} < 10#${wanted[$part]} )); then
@@ -1807,17 +1810,11 @@ scan_repos() {
 
     trap on_scan_interrupt INT
 
-    local i=0
-    while IFS= read -r repo_line; do
+    local i=0 repo_name repo_url is_private default_branch
+    while IFS=$'\t' read -r repo_name repo_url is_private default_branch; do
         i=$((i + 1))
         SCAN_POSITION=$i
-        log INFO "Scanning repo $i/$TOTAL_REPOS: $(echo "$repo_line" | jq -r '.name')"
-
-        local repo_name repo_url is_private default_branch
-        repo_name=$(echo "$repo_line" | jq -r '.name')
-        repo_url=$(echo "$repo_line" | jq -r '.url')
-        is_private=$(echo "$repo_line" | jq -r '.isPrivate')
-        default_branch=$(echo "$repo_line" | jq -r '.defaultBranchRef.name // "main"')
+        log INFO "Scanning repo $i/$TOTAL_REPOS: $repo_name"
 
         # Visibility
         local visibility
@@ -1916,7 +1913,9 @@ scan_repos() {
             fi
         done <<< "$branches"
 
-    done < <(echo "$REPOS_DATA" | jq -c '.[]')
+    # The default branch last: it can be empty ("gh repo view" of an empty
+    # repository), and read joins adjacent tabs.
+    done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, (.defaultBranchRef.name // "main")] | @tsv')
     trap - INT
 
     # Clear progress line
@@ -2105,22 +2104,39 @@ print_row() {
         printf "%s%s%s\n" "$1" "$2" "$NC"
         url_lines=("")
     fi
-    if show_branch_column; then
+    # A cell that fits needs no wrap: no subshell for most rows.
+    if ! show_branch_column; then
+        :
+    elif [[ ${#3} -le $BRANCH_COLUMN_WIDTH ]]; then
+        branch_lines=("$3")
+    else
         while IFS= read -r line; do
             branch_lines+=("$line")
         done < <(wrap_path "$BRANCH_COLUMN_WIDTH" "$3")
     fi
-    if show_path_column; then
+    if ! show_path_column; then
+        :
+    elif [[ ${#4} -le $PATH_COLUMN_WIDTH ]]; then
+        path_lines=("$4")
+    else
         while IFS= read -r line; do
             path_lines+=("$line")
         done < <(wrap_path "$PATH_COLUMN_WIDTH" "$4")
     fi
-    while IFS= read -r line; do
-        package_lines+=("$line")
-    done < <(wrap_path "$PACKAGE_COLUMN_WIDTH" "$5")
-    while IFS= read -r line; do
-        version_lines+=("$line")
-    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$6")
+    if [[ ${#5} -le $PACKAGE_COLUMN_WIDTH ]]; then
+        package_lines=("$5")
+    else
+        while IFS= read -r line; do
+            package_lines+=("$line")
+        done < <(wrap_path "$PACKAGE_COLUMN_WIDTH" "$5")
+    fi
+    if [[ ${#6} -le $VERSION_COLUMN_WIDTH ]]; then
+        version_lines=("$6")
+    else
+        while IFS= read -r line; do
+            version_lines+=("$line")
+        done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$6")
+    fi
 
     local count=${#url_lines[@]}
     if show_branch_column && [[ ${#branch_lines[@]} -gt $count ]]; then
@@ -2178,8 +2194,9 @@ print_row() {
 }
 
 print_results() {
-    local dep_file_name
+    local dep_file_name no_file_group
     dep_file_name=$(dep_file_names)
+    no_file_group="VERSION FILE NOT FOUND (${dep_file_name// /, })"
     dep_file_name="${dep_file_name// / or }"
 
     echo ""
@@ -2228,7 +2245,7 @@ print_results() {
         case "$status" in
             affected | not_affected | found) row_group="FOUND" ;;
             not_in_file) row_group="PACKAGE NOT FOUND" ;;
-            no_file) row_group="VERSION FILE NOT FOUND ($(dep_file_names | sed 's/ /, /g'))" ;;
+            no_file) row_group="$no_file_group" ;;
             *) row_group="PARSE ERROR" ;;
         esac
         if [[ "$row_group" != "$group" ]]; then
