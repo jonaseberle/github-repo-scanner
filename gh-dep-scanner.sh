@@ -91,6 +91,8 @@ NOT_FOUND_COUNT=0
 BRANCHES_SCANNED=0
 NO_BRANCH_COUNT=0
 MERGED_COUNT=0
+# Directories with package-lock.json and yarn.lock.
+LOCK_CONFLICT_COUNT=0
 FILTERED_OUT_COUNT=0
 REFRESHED_COUNT=0
 # Stays empty for a single repository.
@@ -1193,53 +1195,37 @@ refresh_pushed_repos() {
 # DEPENDENCY FILE FETCHING
 #===============================================================================
 
-# Fetch the dependency file in directory $3 ("." is the root) of commit $2.
-# For --type=node, try package-lock.json first, then yarn.lock.
+# Fetch the file $3 (a path, e.g. "webroot/yarn.lock") of commit $2.
+# Prints its content, or NOT_FOUND or PARSE_ERROR.
 fetch_dependency_file() {
     local repo_name="$1"
     local commit="$2"
-    local dir="$3"
-    local dep_file dep_files
-    dep_files=$(dep_file_names)
+    local file="$3"
 
-    local prefix=""
-    if [[ "$dir" != "." ]]; then
-        prefix="$dir/"
-    fi
-
-    # Fetch file content from GitHub API.
     # Use the raw media type: the JSON response has no content for files over 1 MB (e.g. composer.lock).
-    local response=""
-    for dep_file in $dep_files; do
-        local file_path request
-        file_path=$(url_encode "$prefix$dep_file")
-        request="repos/$OWNER/$repo_name/contents/$file_path?ref=$commit"
-        # Cache by commit: a commit never changes, so the entry never gets old.
-        local key="api/repos/$OWNER/$repo_name/commit/$commit/$prefix$dep_file"
-        response=$(gh_cached "$key" api --header "Accept: application/vnd.github.raw+json" "$request") && break
+    local request response
+    request="repos/$OWNER/$repo_name/contents/$(url_encode "$file")?ref=$commit"
+    # Cache by commit: a commit never changes, so the entry never gets old.
+    response=$(gh_cached "api/repos/$OWNER/$repo_name/commit/$commit/$file" api --header "Accept: application/vnd.github.raw+json" "$request") || {
         # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
         if [[ "$(http_status "$response")" != "404" ]]; then
-            print_error "Failed to fetch $prefix$dep_file from $OWNER/$repo_name: $response"
+            print_error "Failed to fetch $file from $OWNER/$repo_name: $response"
             exit 1
         fi
-        response=""
-    done
-
-    if [[ -z "$response" ]]; then
         echo "NOT_FOUND"
         return
-    fi
+    }
 
     # yarn.lock is not JSON.
-    if [[ "$dep_file" != *.json ]] || echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
+    if [[ "$file" != *.json ]] || echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
         echo "$response"
     else
         echo "PARSE_ERROR"
     fi
 }
 
-# Print the directories of commit $2 that contain a dependency file, one per
-# line: the root (".") and those that match --alternativePaths.
+# Print the dependency files of commit $2 as "directory<TAB>file", one per
+# line: in the root (".") and in the directories that match --alternativePaths.
 # Uses the file list of the commit: one request, also for many directories.
 matching_dirs() {
     local repo_name="$1"
@@ -1259,10 +1245,10 @@ matching_dirs() {
         print_warning_line "The file list of $OWNER/$repo_name ($commit) is incomplete (too many files). Some directories are not checked."
     fi
 
-    local dir
-    while IFS= read -r dir; do
+    local dir file
+    while IFS=$'\t' read -r dir file; do
         if [[ "$dir" == "." || "$dir" =~ $ALTERNATIVE_PATHS ]]; then
-            echo "$dir"
+            printf '%s\t%s\n' "$dir" "$file"
         fi
     done < <(echo "$listing" | awk -v names="$(dep_file_names)" '
         BEGIN { n = split(names, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
@@ -1273,7 +1259,7 @@ matching_dirs() {
                 sub(/.*\//, "", file)
                 dir = $0; sub(/\/[^\/]*$/, "", dir)
             }
-            if ((file in wanted) && !(dir in seen)) { seen[dir] = 1; print dir }
+            if (file in wanted) print dir "\t" file
         }')
 }
 
@@ -1723,27 +1709,45 @@ scan_repos() {
                 continue
             fi
 
-            # One row per directory with a dependency file.
-            local dirs dir
+            # The dependency files to read, "directory<TAB>file". Without
+            # --alternativePaths, all candidates in the root: the fetch shows which exist.
+            local candidates dir file
             if [[ -n "$ALTERNATIVE_PATHS" ]]; then
-                dirs=$(matching_dirs "$repo_name" "$commit")
-                if [[ -z "$dirs" ]]; then
-                    record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
+                candidates=$(matching_dirs "$repo_name" "$commit")
+            else
+                candidates=$(for file in $(dep_file_names); do printf '.\t%s\n' "$file"; done)
+            fi
+
+            # One row per found file. Two lock files in one directory (package-lock.json
+            # and yarn.lock) are a mistake: each gets a row, and a warning.
+            local found=0 found_dirs=""
+            while IFS=$'\t' read -r dir file; do
+                if [[ -z "$file" ]]; then
                     continue
                 fi
-            else
-                dirs="."
-            fi
-            while IFS= read -r dir; do
-                local content
-                content=$(fetch_dependency_file "$repo_name" "$commit" "$dir")
-                # Without --alternativePaths, there is no PATH column.
-                if [[ "$content" == "NOT_FOUND" ]]; then
-                    record_file "$repo_url" "$target_branch" "" "$visibility" "$content"
-                else
-                    record_file "$repo_url" "$target_branch" "$dir" "$visibility" "$content"
+                local content path="$file"
+                if [[ "$dir" != "." ]]; then
+                    path="$dir/$file"
                 fi
-            done <<< "$dirs"
+                content=$(fetch_dependency_file "$repo_name" "$commit" "$path")
+                if [[ "$content" == "NOT_FOUND" ]]; then
+                    continue
+                fi
+                found=$((found + 1))
+                if [[ $'\n'"$found_dirs" == *$'\n'"$dir"$'\n'* ]]; then
+                    LOCK_CONFLICT_COUNT=$((LOCK_CONFLICT_COUNT + 1))
+                    print_warning_line "$OWNER/$repo_name ($target_branch), directory $dir: package-lock.json and yarn.lock. Use one package manager."
+                fi
+                found_dirs+="$dir"$'\n'
+                # The PATH column: the lock file with --type=node (there can be two), else the directory.
+                if [[ "$TYPE" != "node" ]]; then
+                    path="$dir"
+                fi
+                record_file "$repo_url" "$target_branch" "$path" "$visibility" "$content"
+            done <<< "$candidates"
+            if [[ $found -eq 0 ]]; then
+                record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
+            fi
         done <<< "$branches"
 
     done < <(echo "$REPOS_DATA" | jq -c '.[]')
@@ -1917,9 +1921,10 @@ show_branch_column() {
     [[ -n "$BRANCHES" ]]
 }
 
-# The PATH column shows where the file was found: only useful with --alternativePaths.
+# The PATH column shows where the file was found: with --alternativePaths, and
+# with --type=node, where a directory can have package-lock.json and yarn.lock.
 show_path_column() {
-    [[ -n "$ALTERNATIVE_PATHS" ]]
+    [[ -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" ]]
 }
 
 # Arguments: color, URL, branch, path, package, version, visibility, and
@@ -2143,6 +2148,9 @@ print_results() {
         absent_note=" (hidden)"
     fi
     echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
+    if [[ $LOCK_CONFLICT_COUNT -gt 0 ]]; then
+        echo -e "  - Directories with package-lock.json and yarn.lock: ${YELLOW}$LOCK_CONFLICT_COUNT${NC}"
+    fi
     echo -e "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}$absent_note"
 
     local requests cache_hits oldest
