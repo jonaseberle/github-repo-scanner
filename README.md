@@ -190,6 +190,16 @@ The repository root is searched first, then `app`, then `src/web`.
   --below 18
 ```
 
+### Show the visibility of each repository
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/orgs/YOUR_ORG/repositories" \
+  --type composer \
+  --package livewire/livewire \
+  --show-visibility
+```
+
 ## Sample Output
 
 ```
