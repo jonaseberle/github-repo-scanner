@@ -86,12 +86,14 @@ Options (values only in the form --option=value):
   --hide-merged       Optional, with --branches: hide branches that are fully
                       merged into the default branch (one request per 100
                       branches; squash and rebase merges are not detected)
-  --delay=<seconds>   Optional: delay after each network request (default: 1);
-                      requests served from the cache do not wait
+  --delay=<seconds>   Optional: delay after each network request (default: 0);
+                      requests served from the cache do not wait. Without it,
+                      the scan slows down when less than 20 % of the rate
+                      limit is left, and waits for the reset when it is used up
   --alternativePaths[=regex]
                       Optional: also check the directories that match this
-                      extended regular expression (one row each); without a
-                      regex, all directories
+                      extended regular expression (one row per dependency
+                      file); without a regex, all directories
   --show-visibility   Optional: add a column with the repo visibility
   --offline           Optional: use the cached repository list and do not check
                       for pushes (a cached scan then needs no network)
@@ -141,17 +143,6 @@ Options (values only in the form --option=value):
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
   --packages='^livewire/livewire$'
-```
-
-### Increase delay for large organizations (avoid rate limits)
-
-```bash
-./gh-dep-scanner.sh \
-  --url="https://github.com/orgs/LargeOrg/repositories" \
-  --type=composer \
-  --packages='^symfony/console$' \
-  --affected='<6' \
-  --delay=2
 ```
 
 ### Check all branches that match a regular expression
@@ -257,24 +248,25 @@ Each GitHub request is cached in `./var/cache` (relative to the current director
 
 ```
 var/cache/
-    api/orgs/YOUR_ORG/repos                     gh api --paginate orgs/YOUR_ORG/repos?sort=pushed ...
-    repo-view/OWNER/REPO                        gh repo view OWNER/REPO ...
-    api/orgs/NAME                               gh api orgs/NAME
+    api/orgs/YOUR_ORG/repos                     gh api --paginate orgs/YOUR_ORG/repos?type=all
+    api/orgs/YOUR_ORG/repos.pushed              the newest pushes (also .updated, .full)
+    api/orgs/NAME?about                         gh api orgs/NAME
+    repo-view/OWNER/REPO                        gh repo view OWNER/REPO
     api/repos/OWNER/REPO/
-        branches?per_page=100                   gh api --paginate repos/OWNER/REPO/branches?per_page=100
-        branches?merged-into=main               gh api graphql ... refs { compare(headRef: "main") } (for --hide-merged)
-        ref/main/composer.lock                  gh api repos/OWNER/REPO/contents/composer.lock?ref=main
-        ref/feat/x/composer.lock                gh api repos/OWNER/REPO/contents/composer.lock?ref=feat/x
-        ref/feat/x/tree?recursive=1             gh api repos/OWNER/REPO/git/trees/feat/x?recursive=1 (for --alternativePaths)
-        ref/feat/x/webroot/composer.lock        gh api repos/OWNER/REPO/contents/webroot/composer.lock?ref=feat/x
+        branches/main                           the commit of branch main
+        branches?per_page=100&heads             all branches with their commits (for --branches)
+        branches?merged-into=main&heads         the same, with the merge state (for --hide-merged)
+        commit/<sha>/composer.lock              the file in commit <sha>
+        commit/<sha>/tree?recursive=1           the file list (for --alternativePaths)
+        commit/<sha>/webroot/composer.lock      a file in a subdirectory
 ```
 
-- Files are cached by branch first: all files of a branch are below `ref/<branch>/`. The branch name is not encoded, so `feat/x` is a directory `feat/` with `x/` in it.
+- Files are cached by commit. A commit does not change, so these entries do not get old.
 - A file that does not exist is cached too, with the suffix `.404`.
 - Other errors (rate limit, authentication, network) are not cached.
-- Each scan updates the repository list (a full list once in 24 hours, else only the repositories with new pushes) and deletes the entries of a repository that are older than its last push. With `--offline`, a cached scan uses only local data.
+- Each scan updates the repository list (a full list once in 24 hours, else only the repositories with new pushes) and deletes the entries of a repository that are older than its last push, except the files by commit. With `--offline`, a cached scan uses only local data.
 - To fetch some requests again, delete their entries, for example:
-  - `rm -r var/cache/api/repos/OWNER/REPO/ref/feat/x` to scan one branch again
+  - `rm -r var/cache/api/repos/OWNER/REPO/branches` to check the branches again
   - `rm -r var/cache/api/repos/OWNER/REPO` to scan one repository again
 - To fetch everything again, use `--no-cache` or delete `var/cache`.
 
@@ -283,42 +275,52 @@ Each run logs its GitHub requests and its steps to `./var/log/gh-dep-scanner.log
 ## Sample Output
 
 ```
-Scanning YOUR_ORG repositories for packages matching ^livewire/livewire$, affected: <4...
+Scanning YOUR_ORG repositories for packages matching ^typo3/cms-core$, affected: <13...
 Branch: default
 
-REPO URL                                   PACKAGE           VERSION
---------                                   -------           -------
+Results: packages matching ^typo3/cms-core$ in repositories (affected: <13)
+================================================================================
 
-AFFECTED
-https://github.com/YOUR_ORG/marketing-site livewire/livewire ~3.1.0
-https://github.com/YOUR_ORG/project-alpha  livewire/livewire ^3.2
+REPO URL                                   PACKAGE        VERSION
+--------                                   -------        -------
 
-NOT AFFECTED
-https://github.com/YOUR_ORG/shop-backend   livewire/livewire ^4.0
+FOUND
+https://github.com/YOUR_ORG/client-portal  typo3/cms-core v12.4.45 *
+https://github.com/YOUR_ORG/project-alpha  typo3/cms-core v13.4.36
+https://github.com/YOUR_ORG/shop-backend   typo3/cms-core v11.5.41 *
+
+PACKAGE NOT FOUND
+https://github.com/YOUR_ORG/time-tracker                  Not found
 
 VERSION FILE NOT FOUND (composer.lock)
-https://github.com/YOUR_ORG/client-portal                    N/A
+https://github.com/YOUR_ORG/marketing-site                N/A
 
 ================================================================================
 Summary:
-  - Total repos scanned: 25
-  - Archived repos: 3
+  - Total repos scanned: 5
+  - Archived repos: 1
   - Packages affected: 2
-  - Repos without composer.lock: 5
-  - Files without packages matching ^livewire/livewire$: 10
-  - Requests served from the cache: 24 of 26 (oldest entry: 2d 3h old)
+  - Repos without composer.lock: 1
+  - Files without packages matching ^typo3/cms-core$: 1
+  - Requests served from the cache: 9 of 11 (oldest entry: 2d 3h old)
 ```
 
 ### Output Legend
 
-Rows are grouped: AFFECTED (version in an `--affected` range), NOT AFFECTED, VERSION FOUND (without `--affected`), PACKAGE NOT FOUND (package not in the dependency file), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
+Rows are grouped: FOUND (the package is in the dependency file), PACKAGE NOT FOUND (the package is not in it), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
 
-| Color | Meaning |
-|-------|---------|
-| Red | Package version is affected |
-| Yellow | No dependency file (composer.lock/composer.json/package-lock.json/yarn.lock/package.json) |
-| Cyan | Dependency file exists but package not found |
-| Green | Package version is not affected (or found, without `--affected`) |
+In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green.
+
+With `--type=node`, the PATH column shows the lock file. A directory with both `package-lock.json` and `yarn.lock` gets a row for each file, and a warning.
+
+During the scan, marks show the progress:
+
+| Mark | Meaning |
+|------|---------|
+| `.` | A network request |
+| `x` | A network or GitHub error; the request is sent again |
+| `z` | A wait for the rate limit |
+| `~` | A wait for another scan that fetches the same entry |
 
 ## Supported URL Formats
 

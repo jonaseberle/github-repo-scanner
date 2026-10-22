@@ -175,7 +175,7 @@ ${BOLD}OPTIONS:${NC}
     --alternativePaths[=regex]
                         Optional: also check the dependency files in the
                         directories that match this extended regular
-                        expression. One row per directory.
+                        expression. One row per dependency file.
                         Without a regex: all directories.
                         Example: --alternativePaths='^(webroot|packages/[^/]+)$'
 
