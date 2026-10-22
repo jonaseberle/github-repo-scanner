@@ -307,7 +307,7 @@ gh_cached() {
     if [[ $status -eq 0 ]]; then
         write_cache_entry "$file" "$output"
         rm -f "$file.404"
-    elif [[ "$output" == *"(HTTP 404)"* ]]; then
+    elif [[ "$(http_status "$output")" == "404" ]]; then
         write_cache_entry "$file.404" "$output"
         rm -f "$file"
     fi
@@ -362,14 +362,24 @@ remove_temp_files() {
     done < <(find "$CACHE_DIR" -type f -name '*.tmp.*')
 }
 
-# gh prints "(HTTP <status>)" for an HTTP error. A GraphQL error has an
-# "errors" list. Without both, the request did not get a response.
+# Print the HTTP status of a failed gh call, or nothing. gh ends its output
+# with "... (HTTP 404)" or, without a message, with "gh: HTTP 400".
+http_status() {
+    if [[ "$1" =~ HTTP\ ([0-9][0-9][0-9])\)?$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+    fi
+}
+
+# A GraphQL error has an "errors" list. Without an HTTP status and without
+# it, the request did not get a response.
 is_retryable_error() {
     if [[ "$1" == *'"errors":['* ]]; then
         return 1
     fi
-    if [[ "$1" =~ \(HTTP\ ([0-9]+)\) ]]; then
-        [[ ${BASH_REMATCH[1]} -ge 500 ]]
+    local status
+    status=$(http_status "$1")
+    if [[ -n "$status" ]]; then
+        [[ $status -ge 500 ]]
     else
         return 0
     fi
@@ -738,7 +748,7 @@ fetch_dependency_file() {
         local key="api/repos/$OWNER/$repo_name/ref/$branch/$prefix$dep_file"
         response=$(gh_cached "$key" api --header "Accept: application/vnd.github.raw+json" "$request") && break
         # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
-        if [[ "$response" != *"(HTTP 404)"* ]]; then
+        if [[ "$(http_status "$response")" != "404" ]]; then
             print_error "Failed to fetch $prefix$dep_file from $OWNER/$repo_name: $response"
             exit 1
         fi
@@ -770,7 +780,7 @@ matching_dirs() {
     listing=$(gh_cached "api/repos/$OWNER/$repo_name/ref/$branch/tree?recursive=1" api "$request" \
         --jq '(if .truncated then "TRUNCATED" else empty end), (.tree[] | select(.type == "blob") | .path)') || {
         # Only a 404 means "no files" (e.g. an empty repository). Other errors must stop the scan.
-        if [[ "$listing" == *"(HTTP 404)"* ]]; then
+        if [[ "$(http_status "$listing")" == "404" ]]; then
             return 0
         fi
         print_error "Failed to fetch the file list of $OWNER/$repo_name ($branch): $listing"
@@ -1011,7 +1021,7 @@ matching_branches() {
         local request="repos/$OWNER/$1/branches?per_page=100"
         listing=$(gh_cached "api/$request" api --paginate "$request" --jq '.[].name') || {
             # Only a 404 means "no branches". Other errors must stop the scan.
-            if [[ "$listing" == *"(HTTP 404)"* ]]; then
+            if [[ "$(http_status "$listing")" == "404" ]]; then
                 return 0
             fi
             print_error "Failed to fetch the branches of $OWNER/$1: $listing"
