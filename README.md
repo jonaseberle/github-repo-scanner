@@ -1,6 +1,6 @@
 # GitHub Dependency Scanner
 
-A bash script that scans all repositories in a GitHub organization or personal account (or a single repository) to find which repos use a specific package below a given version.
+A bash script that scans all repositories in a GitHub organization or personal account (or a single repository) to find which repos use packages in an affected version range.
 
 ## Why?
 
@@ -56,7 +56,7 @@ You'll be prompted for:
 1. GitHub URL (org, personal or a single repository)
 2. Dependency type (composer/node/composerJson/nodeJson)
 3. Packages (regular expression; Enter for all)
-4. Minimum version to check against (optional)
+4. Affected version ranges (optional)
 5. Branch (optional)
 
 ### CLI Flags
@@ -354,7 +354,6 @@ For a constraint (`--type=composerJson`, `--type=nodeJson`), the script takes it
 
 ## Limitations
 
-- Maximum ~1000 repos per scan (GitHub API limit)
 - Does not read `pnpm-lock.yaml`
 - In `yarn.lock`, uses the first entry for the package if there are several versions
 

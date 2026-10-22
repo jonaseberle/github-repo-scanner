@@ -27,7 +27,7 @@ Keep commit messages clean, descriptive, and focused on the actual changes made.
 
 ## Project Overview
 
-A single-file bash script (`gh-dep-scanner.sh`) that scans GitHub repositories (org or personal) to find which repos use a specific package below a given version. Supports Composer (PHP) and Node (JavaScript) dependencies.
+A single-file bash script (`gh-dep-scanner.sh`) that scans GitHub repositories (org or personal) to find which repos use packages in an affected version range. Supports Composer (PHP) and Node (JavaScript) dependencies.
 
 ## Requirements
 
@@ -41,10 +41,10 @@ A single-file bash script (`gh-dep-scanner.sh`) that scans GitHub repositories (
 ./gh-dep-scanner.sh
 
 # With CLI flags
-./gh-dep-scanner.sh --url "https://github.com/orgs/ORG_NAME/repositories" \
-                    --type composer \
-                    --package livewire/livewire \
-                    --below 4
+./gh-dep-scanner.sh --url="https://github.com/orgs/ORG_NAME/repositories" \
+                    --type=composer \
+                    --packages='^livewire/livewire$' \
+                    --affected='<4'
 
 # Show help
 ./gh-dep-scanner.sh --help
@@ -56,21 +56,25 @@ The script is organized into sections marked by comment blocks:
 
 1. **HELPER FUNCTIONS** - Color output utilities (`print_error`, `print_success`, etc.)
 2. **PREREQUISITES CHECK** - Verifies `gh` and `jq` are installed
-3. **ARGUMENT PARSING** - Handles `--url`, `--type`, `--package`, `--below`, `--branch`, `--delay` flags
+3. **ARGUMENT PARSING** - Options in the form `--option=value` only (see `--help`)
 4. **INTERACTIVE MODE** - Prompts user for missing required inputs
 5. **URL PARSING** - Extracts owner/org from various GitHub URL formats
-6. **REPOSITORY FETCHING** - Uses `gh repo list` to get all repos
-7. **DEPENDENCY FILE FETCHING** - Fetches `composer.json` or `package.json` via GitHub API
-8. **VERSION EXTRACTION** - Parses package version from dependency file using `jq`
-9. **VERSION COMPARISON** - Extracts major version from constraints (`^3.2` → `3`)
-10. **MAIN SCANNING LOGIC** - Iterates repos with rate limiting
+6. **REPOSITORY FETCHING** - REST repository list, updated from the cache by push and update time
+7. **DEPENDENCY FILE FETCHING** - Fetches the dependency files by commit (batched with GraphQL for the root files)
+8. **VERSION EXTRACTION** - Lists the packages of a dependency file (`jq`, `awk` for `yarn.lock`)
+9. **VERSION COMPARISON** - Parses constraints to major, minor, patch and checks the `--affected` ranges
+10. **MAIN SCANNING LOGIC** - Iterates repos and branches
 11. **OUTPUT** - Colored table output with summary
 
 ## Key Functions
 
-- `get_major_version()` - Parses version constraints (handles `^`, `~`, `>=`, OR constraints, etc.)
-- `fetch_dependency_file()` - Returns base64-decoded file content or `NOT_FOUND`/`PARSE_ERROR`
-- `extract_version()` - Uses `jq` to extract package version from require/dependencies
+- `gh_cached()` - Runs a `gh` call once and caches its output in `./var/cache` (a 404 as `<key>.404`), with a lock per key
+- `gh_request()` - Sends a `gh` call: pacing, retries, rate limit waits
+- `fetch_dependency_file()` - Returns the file content of a commit or `NOT_FOUND`/`PARSE_ERROR`
+- `prefetch_dependency_files()` - Fills the cache with the root dependency files of 20 repos per GraphQL request
+- `list_packages()` - Prints `name<TAB>version` for all packages of a dependency file
+- `parse_version()` - Sets `VERSION` to major, minor, patch of a constraint (`^`, `~`, `>=`, OR constraints, etc.)
+- `is_affected()` - Checks a version against the `--affected` ranges
 
 ## Commit Guidelines
 

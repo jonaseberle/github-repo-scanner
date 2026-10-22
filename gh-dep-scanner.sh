@@ -1034,7 +1034,7 @@ fetch_repos() {
 
     local repos_json
     if [[ "$OWNER_TYPE" == "repo" ]]; then
-        # Wrap in an array to get the same shape as "gh repo list".
+        # Wrap in an array to get the shape of the repository list (REPO_FIELDS).
         # Fresh: its push time tells which cache entries are outdated. --offline uses the cache.
         local view=gh_fresh
         if [[ $OFFLINE -eq 1 ]]; then
@@ -1051,7 +1051,7 @@ fetch_repos() {
         }
     fi
 
-    # Filter here: "gh repo list --no-archived" and "--archived" return incomplete lists.
+    # The list has the archived repositories too: count them, then skip them.
     if [[ "$OWNER_TYPE" != "repo" ]]; then
         ARCHIVED_COUNT=$(echo "$repos_json" | jq '[.[] | select(.isArchived)] | length')
         repos_json=$(echo "$repos_json" | jq '[.[] | select(.isArchived | not)]')
@@ -1096,7 +1096,7 @@ gh_fresh() {
     gh_cached "$@"
 }
 
-# The REST fields of a repository, in the shape of "gh repo list --json".
+# The REST fields of a repository, with the names of "gh repo view --json".
 REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at, updatedAt: .updated_at}'
 # The number of repositories of an org or user (jq, on "gh api orgs/NAME").
 # Nothing if GitHub does not give the private ones: this needs a token scope
