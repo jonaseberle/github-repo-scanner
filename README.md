@@ -81,6 +81,8 @@ Options (values only in the form --option=value):
   --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a
                       regex, all branches
+  --hide-unknown      Optional: hide rows without a dependency file
+  --hide-absent       Optional: also hide rows without a matching package
   --hide-merged       Optional, with --branches: hide branches that are fully
                       merged into the default branch (one request per 100
                       branches; squash and rebase merges are not detected)
