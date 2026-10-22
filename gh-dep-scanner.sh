@@ -961,10 +961,19 @@ scan_repos() {
             branches="${BRANCH:-$default_branch}"
         fi
 
+        local branch_count=0 branch_number=0
+        for target_branch in $branches; do
+            branch_count=$((branch_count + 1))
+        done
         for target_branch in $branches; do
             BRANCHES_SCANNED=$((BRANCHES_SCANNED + 1))
+            branch_number=$((branch_number + 1))
 
-            print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name${BRANCHES:+ ($target_branch)}"
+            if [[ -n "$BRANCHES" ]]; then
+                print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name, branch $target_branch ($branch_number/$branch_count)"
+            else
+                print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name"
+            fi
 
             # One row per directory with a dependency file.
             local dirs dir
