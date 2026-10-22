@@ -234,16 +234,31 @@ gh_cached() {
         return 1
     fi
 
-    # One dot per network request shows progress during slow requests.
-    if [[ -t 2 ]]; then
-        printf '.' >&2
-    fi
+    # Retry a network error (no HTTP status, e.g. "connection reset") or a 5xx
+    # up to 3 times. Other HTTP errors (404, rate limit, authentication) do
+    # not change on retry.
+    local output status attempt
+    for attempt in 1 2 3 4; do
+        # One dot per network request shows progress during slow requests.
+        if [[ -t 2 ]]; then
+            printf '.' >&2
+        fi
 
-    local output status=0
-    output=$(gh "$@" 2>&1) || status=$?
-    echo "network" >> "$REQUEST_LOG"
-    # Rate limiting delay
-    sleep "$DELAY"
+        status=0
+        output=$(gh "$@" 2>&1) || status=$?
+        echo "network" >> "$REQUEST_LOG"
+        # Rate limiting delay
+        sleep "$DELAY"
+
+        if [[ $status -eq 0 || $attempt -eq 4 ]] || ! is_retryable_error "$output"; then
+            break
+        fi
+        # A red "x" replaces the dot of the failed attempt.
+        if [[ -t 2 ]]; then
+            printf '\b%sx%s' "$RED" "$NC" >&2
+        fi
+        sleep $((attempt * 2))
+    done
 
     if [[ $status -eq 0 ]]; then
         write_cache_entry "$file" "$output"
@@ -301,6 +316,16 @@ remove_temp_files() {
             rm -f "$tmp"
         fi
     done < <(find "$CACHE_DIR" -type f -name '*.tmp.*')
+}
+
+# gh prints "(HTTP <status>)" for an HTTP error. Without it, the request did
+# not get a response.
+is_retryable_error() {
+    if [[ "$1" =~ \(HTTP\ ([0-9]+)\) ]]; then
+        [[ ${BASH_REMATCH[1]} -ge 500 ]]
+    else
+        return 0
+    fi
 }
 
 # Short options only: BSD mkdir and mv (macOS) have no long options.
