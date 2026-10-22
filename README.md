@@ -210,8 +210,8 @@ REPO URL                                                VERSION
 --------                                                -------
 
 VERSION BELOW
-https://github.com/YOUR_ORG/project-alpha               ^3.2
 https://github.com/YOUR_ORG/marketing-site              ~3.1.0
+https://github.com/YOUR_ORG/project-alpha               ^3.2
 
 VERSION ABOVE
 https://github.com/YOUR_ORG/shop-backend                ^4.0
@@ -230,7 +230,7 @@ Summary:
 
 ### Output Legend
 
-Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), VERSION FOUND (package found, without `--below`), NOT FOUND (package not in the dependency file) and N/A (no dependency file).
+Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), VERSION FOUND (package found, without `--below`), NOT FOUND (package not in the dependency file) and N/A (no dependency file). Inside each group, rows are sorted by URL.
 
 | Color | Meaning |
 |-------|---------|

@@ -702,11 +702,15 @@ print_results() {
 
     local has_results=0
 
+    # Sort the rows by URL. URLs contain no spaces.
+    local sorted_rows
+    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} $i"; done | sort --ignore-case | awk '{ print $2 }')
+
     # Group the rows: version below, version above (or found), package not found, no file.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
     local ordered_rows="" wanted_status i
     for wanted_status in below ok found not_in_file no_file error; do
-        for i in "${!RESULT_STATUS[@]}"; do
+        for i in $sorted_rows; do
             if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" ]]; then
                 ordered_rows+=" $i"
             fi
