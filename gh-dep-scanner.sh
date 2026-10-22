@@ -44,6 +44,7 @@ BELOW_VERSION=""
 declare -a RESULT_URLS=()
 declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
+declare -a RESULT_PATHS=()
 declare -a RESULT_STATUS=()
 
 # Counters
@@ -632,10 +633,13 @@ fetch_dependency_file() {
         done
     done
 
+    # The first output line is the directory of the file: "." for the root, empty if not found.
     if [[ -z "$response" ]]; then
+        echo ""
         echo "NOT_FOUND"
         return
     fi
+    echo "${path:-.}"
 
     # yarn.lock is not JSON.
     if [[ "$dep_file" != *.json ]] || echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
@@ -840,8 +844,10 @@ scan_repos() {
             print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name${BRANCHES:+ ($target_branch)}"
 
             # Fetch dependency file
-            local content
-            content=$(fetch_dependency_file "$repo_name" "$target_branch")
+            local fetched content found_path
+            fetched=$(fetch_dependency_file "$repo_name" "$target_branch")
+            found_path="${fetched%%$'\n'*}"
+            content="${fetched#*$'\n'}"
 
             local version_str status
 
@@ -884,6 +890,7 @@ scan_repos() {
             RESULT_URLS+=("$row_url")
             RESULT_VERSIONS+=("$version_str")
             RESULT_VISIBILITY+=("$visibility")
+            RESULT_PATHS+=("$found_path")
             RESULT_STATUS+=("$status")
         done
 
@@ -931,13 +938,39 @@ wrap_text() {
     fi
 }
 
+# Like wrap_text, but break a path after a "/".
+wrap_path() {
+    local width="$1" rest="$2" line="" part
+    while [[ -n "$rest" ]]; do
+        if [[ "$rest" == */* ]]; then
+            part="${rest%%/*}/"
+            rest="${rest#*/}"
+        else
+            part="$rest"
+            rest=""
+        fi
+        if [[ -n "$line" && $((${#line} + ${#part})) -gt $width ]]; then
+            echo "$line"
+            line=""
+        fi
+        line+="$part"
+        # A part that is longer than the line is split.
+        while [[ ${#line} -gt $width ]]; do
+            echo "${line:0:$width}"
+            line="${line:$width}"
+        done
+    done
+    echo "$line"
+}
+
 # Column widths, set by set_column_widths.
 URL_COLUMN_WIDTH=55
 VERSION_COLUMN_WIDTH=15
+PATH_COLUMN_WIDTH=4
 
 # Fit the columns to the longest values and to the terminal width.
 set_column_widths() {
-    local i url_width=8 version_width=7
+    local i url_width=8 version_width=7 path_width=4
     for i in "${!RESULT_URLS[@]}"; do
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
@@ -945,12 +978,21 @@ set_column_widths() {
         if [[ ${#RESULT_VERSIONS[$i]} -gt $version_width ]]; then
             version_width=${#RESULT_VERSIONS[$i]}
         fi
+        if [[ ${#RESULT_PATHS[$i]} -gt $path_width ]]; then
+            path_width=${#RESULT_PATHS[$i]}
+        fi
     done
+    if [[ $path_width -gt $((TERM_COLUMNS / 3)) ]]; then
+        path_width=$((TERM_COLUMNS / 3))
+    fi
 
     # Keep at least 20 columns for the version and the visibility.
     local visibility_width=0
     if [[ $SHOW_VISIBILITY -eq 1 ]]; then
         visibility_width=11
+    fi
+    if show_path_column; then
+        visibility_width=$((visibility_width + path_width + 1))
     fi
     local max_url_width=$((TERM_COLUMNS - 1 - 20 - visibility_width))
     if [[ $url_width -gt $max_url_width ]]; then
@@ -969,39 +1011,57 @@ set_column_widths() {
 
     URL_COLUMN_WIDTH=$url_width
     VERSION_COLUMN_WIDTH=$version_width
+    PATH_COLUMN_WIDTH=$path_width
 }
 
-# Arguments: color, URL, version, visibility
-# A version that is too wide wraps and stays in its column.
+# The PATH column shows where the file was found: only useful with --alternativePaths.
+show_path_column() {
+    [[ -n "$ALTERNATIVE_PATHS" ]]
+}
+
+# Arguments: color, URL, path, version, visibility
+# A path or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
 print_row() {
-    local -a url_lines=("$2") version_lines=()
+    local -a url_lines=("$2") path_lines=() version_lines=()
     local line
     if [[ ${#2} -gt $URL_COLUMN_WIDTH ]]; then
         printf "%s%s%s\n" "$1" "$2" "$NC"
         url_lines=("")
     fi
     while IFS= read -r line; do
+        path_lines+=("$line")
+    done < <(wrap_path "$PATH_COLUMN_WIDTH" "$3")
+    while IFS= read -r line; do
         version_lines+=("$line")
-    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$3")
+    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$4")
 
     local count=${#url_lines[@]}
+    if show_path_column && [[ ${#path_lines[@]} -gt $count ]]; then
+        count=${#path_lines[@]}
+    fi
     if [[ ${#version_lines[@]} -gt $count ]]; then
         count=${#version_lines[@]}
     fi
 
-    local i visibility
+    local i row cell
     for ((i = 0; i < count; i++)); do
-        if [[ $SHOW_VISIBILITY -eq 1 ]]; then
-            visibility=""
-            if [[ $i -eq 0 ]]; then
-                visibility="$4"
-            fi
-            printf "%s%-*s %-*s %s%s\n" "$1" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}" "$visibility" "$NC"
-        else
-            printf "%s%-*s %s%s\n" "$1" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}" "${version_lines[$i]:-}" "$NC"
+        printf -v row "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
+        if show_path_column; then
+            printf -v cell " %-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
+            row+="$cell"
         fi
+        if [[ $SHOW_VISIBILITY -eq 1 ]]; then
+            printf -v cell " %-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
+            row+="$cell"
+            if [[ $i -eq 0 ]]; then
+                row+=" $5"
+            fi
+        else
+            row+=" ${version_lines[$i]:-}"
+        fi
+        printf "%s%s%s\n" "$1" "$row" "$NC"
     done
 }
 
@@ -1017,8 +1077,8 @@ print_results() {
 
     # Print header
     set_column_widths
-    print_row "$BOLD" "REPO URL" "VERSION" "VISIBILITY"
-    print_row "" "--------" "-------" "----------"
+    print_row "$BOLD" "REPO URL" "PATH" "VERSION" "VISIBILITY"
+    print_row "" "--------" "----" "-------" "----------"
 
     local has_results=0
 
@@ -1043,6 +1103,7 @@ print_results() {
         local url="${RESULT_URLS[$i]}"
         local version="${RESULT_VERSIONS[$i]}"
         local visibility="${RESULT_VISIBILITY[$i]}"
+        local path="${RESULT_PATHS[$i]}"
 
         case "$status" in
             below) row_group="VERSION BELOW" ;;
@@ -1059,18 +1120,18 @@ print_results() {
 
         # Repos at or above the version do not count as results.
         if [[ "$status" == "below" ]]; then
-            print_row "$RED" "$url" "$version" "$visibility"
+            print_row "$RED" "$url" "$path" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "ok" ]]; then
-            print_row "$GREEN" "$url" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$path" "$version" "$visibility"
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$path" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            print_row "$YELLOW" "$url" "$version" "$visibility"
+            print_row "$YELLOW" "$url" "$path" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            print_row "$CYAN" "$url" "$version" "$visibility"
+            print_row "$CYAN" "$url" "$path" "$version" "$visibility"
             has_results=1
         fi
     done
