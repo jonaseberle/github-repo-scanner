@@ -299,7 +299,7 @@ Summary:
 
 ### Output Legend
 
-Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), VERSION FOUND (package found, without `--below`), NOT FOUND (package not in the dependency file) and N/A (no dependency file). Inside each group, rows are sorted by URL.
+Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), VERSION FOUND (package found, without `--below`), PACKAGE NOT FOUND (package not in the dependency file) and N/A (no dependency file). Inside each group, rows are sorted by URL.
 
 | Color | Meaning |
 |-------|---------|

@@ -1270,7 +1270,7 @@ print_results() {
             below) row_group="VERSION BELOW" ;;
             ok) row_group="VERSION ABOVE" ;;
             found) row_group="VERSION FOUND" ;;
-            not_in_file) row_group="NOT FOUND" ;;
+            not_in_file) row_group="PACKAGE NOT FOUND" ;;
             *) row_group="N/A" ;;
         esac
         if [[ "$row_group" != "$group" ]]; then
