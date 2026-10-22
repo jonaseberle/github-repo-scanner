@@ -18,8 +18,8 @@ This script fills that gap.
 
 - Scans all repositories in a GitHub organization or personal account (archived repositories are skipped)
 - Supports **Composer** (PHP) and **Node** (JavaScript) dependencies
-- Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type composerJson`)
-- Reads the installed Node version from `package-lock.json` or `yarn.lock` (or the constraint from `package.json` with `--type nodeJson`)
+- Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type=composerJson`)
+- Reads the installed Node version from `package-lock.json` or `yarn.lock` (or the constraint from `package.json` with `--type=nodeJson`)
 - Interactive mode or CLI flags for automation
 - Rate limiting to avoid GitHub API limits
 - Caches every GitHub request in `./var/cache`, so a second scan needs no network
@@ -64,21 +64,21 @@ You'll be prompted for:
 ```bash
 ./gh-dep-scanner.sh [OPTIONS]
 
-Options:
-  --url <url>         GitHub URL (org or personal repos page, or one repo)
-  --type <type>       Dependency type: "composer" (composer.lock), "composerJson"
+Options (values only in the form --option=value):
+  --url=<url>         GitHub URL (org or personal repos page, or one repo)
+  --type=<type>       Dependency type: "composer" (composer.lock), "composerJson"
                       (composer.json), "node" (package-lock.json or yarn.lock)
                       or "nodeJson" (package.json)
-  --package <name>    Package name to search for
-  --below <version>   Optional: find packages below this major version
+  --package=<name>    Package name to search for
+  --below=<version>   Optional: find packages below this major version
                       (default: find all repos that have the package)
-  --branch <name>     Optional: specific branch to check (default: repo's default)
-  --branches [regex]  Optional: check all branches that match this extended
+  --branch=<name>     Optional: specific branch to check (default: repo's default)
+  --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a
                       regex, all branches
-  --delay <seconds>   Optional: delay after each network request (default: 1);
+  --delay=<seconds>   Optional: delay after each network request (default: 1);
                       requests served from the cache do not wait
-  --alternativePaths <path1[,path2,...]>
+  --alternativePaths=<path1[,path2,...]>
                       Optional: directories to search for the dependency file
                       if it is not in the repository root, in this order
   --show-visibility   Optional: add a column with the repo visibility
@@ -94,51 +94,51 @@ Options:
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composer \
-  --package livewire/livewire \
-  --below 4
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --package=livewire/livewire \
+  --below=4
 ```
 
 ### Find repos with React < v18 for a personal account
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/USERNAME" \
-  --type node \
-  --package react \
-  --below 18
+  --url="https://github.com/USERNAME" \
+  --type=node \
+  --package=react \
+  --below=18
 ```
 
 ### Find repos with Laravel < v10 on develop branch
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/MyOrg/repositories" \
-  --type composer \
-  --package laravel/framework \
-  --below 10 \
-  --branch develop
+  --url="https://github.com/orgs/MyOrg/repositories" \
+  --type=composer \
+  --package=laravel/framework \
+  --below=10 \
+  --branch=develop
 ```
 
 ### Find all repos that use Livewire, in any version
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composer \
-  --package livewire/livewire
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --package=livewire/livewire
 ```
 
 ### Increase delay for large organizations (avoid rate limits)
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/LargeOrg/repositories" \
-  --type composer \
-  --package symfony/console \
-  --below 6 \
-  --delay 2
+  --url="https://github.com/orgs/LargeOrg/repositories" \
+  --type=composer \
+  --package=symfony/console \
+  --below=6 \
+  --delay=2
 ```
 
 ### Check all branches that match a regular expression
@@ -148,15 +148,15 @@ Options:
 ```bash
 # Branches that start with feat/ or upgrade/
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composer \
-  --package typo3/cms-core \
-  --below 13 \
-  --branches '^feat/|^upgrade/'
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --package=typo3/cms-core \
+  --below=13 \
+  --branches='^feat/|^upgrade/'
 
 # Branches that contain "typo3", or end with "upgrade"
-./gh-dep-scanner.sh ... --branches 'typo3'
-./gh-dep-scanner.sh ... --branches 'upgrade$'
+./gh-dep-scanner.sh ... --branches='typo3'
+./gh-dep-scanner.sh ... --branches='upgrade$'
 
 # All branches
 ./gh-dep-scanner.sh ... --branches
@@ -168,10 +168,10 @@ Options:
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composer \
-  --package livewire/livewire \
-  --below 4 \
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --package=livewire/livewire \
+  --below=4 \
   --verbose
 ```
 
@@ -179,20 +179,20 @@ Options:
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/OWNER/REPO" \
-  --type composer \
-  --package laravel/framework \
-  --below 10
+  --url="https://github.com/OWNER/REPO" \
+  --type=composer \
+  --package=laravel/framework \
+  --below=10
 ```
 
 ### Check the constraint in composer.json instead of the installed version
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composerJson \
-  --package livewire/livewire \
-  --below 4
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composerJson \
+  --package=livewire/livewire \
+  --below=4
 ```
 
 ### Also search subdirectories for the dependency file
@@ -201,30 +201,30 @@ The repository root is searched first, then `app`, then `src/web`.
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composer \
-  --package typo3/cms-core \
-  --below 12 \
-  --alternativePaths app,src/web
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --package=typo3/cms-core \
+  --below=12 \
+  --alternativePaths=app,src/web
 ```
 
 ### Check the constraint in package.json instead of the installed version
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/USERNAME" \
-  --type nodeJson \
-  --package react \
-  --below 18
+  --url="https://github.com/USERNAME" \
+  --type=nodeJson \
+  --package=react \
+  --below=18
 ```
 
 ### Show the visibility of each repository
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composer \
-  --package livewire/livewire \
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --package=livewire/livewire \
   --show-visibility
 ```
 
@@ -234,9 +234,9 @@ The repository root is searched first, then `app`, then `src/web`.
 
 ```bash
 ./gh-dep-scanner.sh \
-  --url "https://github.com/orgs/YOUR_ORG/repositories" \
-  --type composer \
-  --package livewire/livewire \
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --package=livewire/livewire \
   --no-cache
 ```
 
