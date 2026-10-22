@@ -864,13 +864,111 @@ scan_repos() {
 # OUTPUT
 #===============================================================================
 
-# Arguments: color, URL, version, visibility
-print_row() {
-    if [[ $SHOW_VISIBILITY -eq 1 ]]; then
-        printf "%s%-55s %-15s %-10s%s\n" "$1" "$2" "$3" "$4" "$NC"
-    else
-        printf "%s%-55s %s%s\n" "$1" "$2" "$3" "$NC"
+# Print $2 in lines of at most $1 characters. Break at spaces where possible.
+wrap_text() {
+    local width="$1" text="$2" line="" word
+    if [[ ${#text} -le $width ]]; then
+        echo "$text"
+        return
     fi
+    # read, not "for word in $text": a version like "3.*" must not glob.
+    local -a words
+    read -r -a words <<< "$text"
+    for word in "${words[@]}"; do
+        while [[ ${#word} -gt $width ]]; do
+            if [[ -n "$line" ]]; then
+                echo "$line"
+                line=""
+            fi
+            echo "${word:0:$width}"
+            word="${word:$width}"
+        done
+        if [[ -z "$line" ]]; then
+            line="$word"
+        elif [[ $((${#line} + 1 + ${#word})) -le $width ]]; then
+            line="$line $word"
+        else
+            echo "$line"
+            line="$word"
+        fi
+    done
+    if [[ -n "$line" ]]; then
+        echo "$line"
+    fi
+}
+
+# Column widths, set by set_column_widths.
+URL_COLUMN_WIDTH=55
+VERSION_COLUMN_WIDTH=15
+
+# Fit the columns to the longest values and to the terminal width.
+set_column_widths() {
+    local i url_width=8 version_width=7
+    for i in "${!RESULT_URLS[@]}"; do
+        if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
+            url_width=${#RESULT_URLS[$i]}
+        fi
+        if [[ ${#RESULT_VERSIONS[$i]} -gt $version_width ]]; then
+            version_width=${#RESULT_VERSIONS[$i]}
+        fi
+    done
+
+    # Keep at least 20 columns for the version and the visibility.
+    local visibility_width=0
+    if [[ $SHOW_VISIBILITY -eq 1 ]]; then
+        visibility_width=11
+    fi
+    local max_url_width=$((TERM_COLUMNS - 1 - 20 - visibility_width))
+    if [[ $url_width -gt $max_url_width ]]; then
+        url_width=$max_url_width
+    fi
+    if [[ $url_width -lt 20 ]]; then
+        url_width=20
+    fi
+    local max_version_width=$((TERM_COLUMNS - url_width - 1 - visibility_width))
+    if [[ $version_width -gt $max_version_width ]]; then
+        version_width=$max_version_width
+    fi
+    if [[ $version_width -lt 10 ]]; then
+        version_width=10
+    fi
+
+    URL_COLUMN_WIDTH=$url_width
+    VERSION_COLUMN_WIDTH=$version_width
+}
+
+# Arguments: color, URL, version, visibility
+# A version that is too wide wraps and stays in its column.
+# A URL never wraps: a line break makes it unclickable. A URL that is too
+# wide gets its own line, and the other cells start on the next line.
+print_row() {
+    local -a url_lines=("$2") version_lines=()
+    local line
+    if [[ ${#2} -gt $URL_COLUMN_WIDTH ]]; then
+        printf "%s%s%s\n" "$1" "$2" "$NC"
+        url_lines=("")
+    fi
+    while IFS= read -r line; do
+        version_lines+=("$line")
+    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$3")
+
+    local count=${#url_lines[@]}
+    if [[ ${#version_lines[@]} -gt $count ]]; then
+        count=${#version_lines[@]}
+    fi
+
+    local i visibility
+    for ((i = 0; i < count; i++)); do
+        if [[ $SHOW_VISIBILITY -eq 1 ]]; then
+            visibility=""
+            if [[ $i -eq 0 ]]; then
+                visibility="$4"
+            fi
+            printf "%s%-*s %-*s %s%s\n" "$1" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}" "$visibility" "$NC"
+        else
+            printf "%s%-*s %s%s\n" "$1" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}" "${version_lines[$i]:-}" "$NC"
+        fi
+    done
 }
 
 print_results() {
@@ -884,6 +982,7 @@ print_results() {
     echo ""
 
     # Print header
+    set_column_widths
     print_row "$BOLD" "REPO URL" "VERSION" "VISIBILITY"
     print_row "" "--------" "-------" "----------"
 
