@@ -38,6 +38,10 @@ ALTERNATIVE_PATHS=""
 REPO_FILTER=""
 SHOW_VISIBILITY=0
 CACHE_DIR="./var/cache"
+# One lock per cache key while a process fetches it: others wait for it.
+LOCK_DIR="./var/lock"
+# Start of this scan (epoch seconds): an entry written since then is fresh.
+SCAN_STARTED=$(date +%s)
 LOG_FILE="./var/log/gh-dep-scanner.log"
 # At startup, a log of this size or more is cut to its newer half.
 LOG_MAX_BYTES=$((20 * 1024 * 1024))
@@ -316,6 +320,29 @@ gh_cached() {
         return 1
     fi
 
+    # Only one process fetches a key. Another one waits and then uses the entry:
+    # from the cache, or (also without the cache) if it was written during
+    # this scan, e.g. the repository list.
+    local lock
+    lock=$(lock_path "$key")
+    acquire_lock "$lock" "$key"
+    if [[ $LOCK_WAITED -eq 1 ]] && { [[ $USE_CACHE -eq 1 ]] || written_since_start "$file" || written_since_start "$file.404"; }; then
+        if [[ -f "$file" ]]; then
+            release_lock "$lock"
+            log DEBUG "cache hit after waiting: $key"
+            echo "cache $(file_mtime "$file")" >> "$REQUEST_LOG"
+            cat "$file"
+            return 0
+        fi
+        if [[ -f "$file.404" ]]; then
+            release_lock "$lock"
+            log DEBUG "cache hit (404) after waiting: $key"
+            echo "cache $(file_mtime "$file.404")" >> "$REQUEST_LOG"
+            cat "$file.404"
+            return 1
+        fi
+    fi
+
     # Retry a network error (no HTTP status, e.g. "connection reset") or a 5xx
     # up to 3 times. Other HTTP errors (404, rate limit, authentication) do
     # not change on retry.
@@ -356,8 +383,72 @@ gh_cached() {
         rm -f "$file"
         log DEBUG "cache write (404): $key"
     fi
+    release_lock "$lock"
     printf '%s\n' "$output"
     return $status
+}
+
+written_since_start() {
+    [[ -f "$1" && $(file_mtime "$1") -ge $SCAN_STARTED ]]
+}
+
+# A lock is a directory: mkdir creates it or fails, in one step, also on macOS.
+# Its name is a checksum of the key: flat, and short also for long keys.
+lock_path() {
+    local sum
+    sum=$(printf '%s' "$1" | cksum)
+    echo "$LOCK_DIR/${sum%% *}"
+}
+
+# Wait until this process has the lock. LOCK_WAITED=1 if another process
+# had it: then that process may have written the cache entry.
+# Arguments: lock, key (for the log)
+acquire_lock() {
+    LOCK_WAITED=0
+    mkdir -p "$LOCK_DIR"
+    local holder waited=0
+    while ! mkdir "$1" 2>/dev/null; do
+        holder=$(cat "$1/pid" 2>/dev/null || true)
+        # A lock of a process that no longer runs (e.g. kill -9) is removed.
+        # Short option: BSD ps (macOS) has no --pid.
+        if [[ -n "$holder" ]] && ! ps -p "$holder" > /dev/null 2>&1; then
+            log WARN "Removing the lock of process $holder, which no longer runs: $2"
+            release_lock "$1"
+            continue
+        fi
+        # No pid after 10 s: the process stopped between mkdir and writing it.
+        if [[ -z "$holder" && $waited -ge 50 ]]; then
+            log WARN "Removing a lock without a process: $2"
+            release_lock "$1"
+            continue
+        fi
+        if [[ $waited -eq 0 ]]; then
+            log DEBUG "waiting for the lock of process ${holder:-?}: $2"
+        fi
+        LOCK_WAITED=1
+        waited=$((waited + 1))
+        sleep 0.2
+    done
+    echo "$$" >| "$1/pid"
+    echo "$2" >| "$1/key"
+}
+
+release_lock() {
+    rm -f "$1/pid" "$1/key"
+    rmdir "$1" 2>/dev/null || true
+}
+
+# Remove the locks of this process, e.g. after Ctrl-C during a request.
+remove_own_locks() {
+    if [[ ! -d "$LOCK_DIR" ]]; then
+        return 0
+    fi
+    local pid_file
+    for pid_file in "$LOCK_DIR"/*/pid; do
+        if [[ -f "$pid_file" && "$(cat "$pid_file")" == "$$" ]]; then
+            release_lock "${pid_file%/pid}"
+        fi
+    done
 }
 
 # Percent-encode all characters except letters, digits, "-", ".", "_", "~"
@@ -1788,7 +1879,7 @@ main() {
     parse_args "$@"
 
     REQUEST_LOG=$(mktemp)
-    trap 'rm -f "$REQUEST_LOG"; remove_temp_files' EXIT
+    trap 'rm -f "$REQUEST_LOG"; remove_temp_files; remove_own_locks' EXIT
     remove_temp_files
 
     # Check prerequisites
