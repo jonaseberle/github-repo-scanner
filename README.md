@@ -16,7 +16,7 @@ This script fills that gap.
 
 ## Features
 
-- Scans all repositories in a GitHub organization or personal account
+- Scans all repositories in a GitHub organization or personal account (archived repositories are skipped)
 - Supports **Composer** (PHP) and **Node** (JavaScript) dependencies
 - Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type composerJson`)
 - Interactive mode or CLI flags for automation

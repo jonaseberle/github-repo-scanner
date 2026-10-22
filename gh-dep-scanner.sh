@@ -375,12 +375,12 @@ fetch_repos() {
             exit 1
         }
     elif [[ "$OWNER_TYPE" == "org" ]]; then
-        repos_json=$(gh repo list "$OWNER" --limit 1000 --json name,url,isPrivate,defaultBranchRef 2>&1) || {
+        repos_json=$(gh repo list "$OWNER" --no-archived --limit 1000 --json name,url,isPrivate,defaultBranchRef 2>&1) || {
             print_error "Failed to fetch repositories for organization: $OWNER"
             exit 1
         }
     else
-        repos_json=$(gh repo list "$OWNER" --limit 1000 --json name,url,isPrivate,defaultBranchRef 2>&1) || {
+        repos_json=$(gh repo list "$OWNER" --no-archived --limit 1000 --json name,url,isPrivate,defaultBranchRef 2>&1) || {
             print_error "Failed to fetch repositories for user: $OWNER"
             exit 1
         }
