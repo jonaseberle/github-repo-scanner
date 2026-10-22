@@ -45,6 +45,7 @@ declare -a RESULT_URLS=()
 declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
 declare -a RESULT_PATHS=()
+declare -a RESULT_BRANCHES=()
 declare -a RESULT_STATUS=()
 
 # Counters
@@ -847,9 +848,9 @@ matching_branches() {
 #===============================================================================
 
 # Classify the content of a dependency file and add a result row.
-# Arguments: row URL, visibility, path, content (or NOT_FOUND / PARSE_ERROR)
+# Arguments: URL, branch, path, visibility, content (or NOT_FOUND / PARSE_ERROR)
 record_result() {
-    local content="$4"
+    local content="$5"
 
     local version_str status
 
@@ -884,8 +885,9 @@ record_result() {
     fi
 
     RESULT_URLS+=("$1")
-    RESULT_VISIBILITY+=("$2")
+    RESULT_BRANCHES+=("$2")
     RESULT_PATHS+=("$3")
+    RESULT_VISIBILITY+=("$4")
     RESULT_VERSIONS+=("$version_str")
     RESULT_STATUS+=("$status")
 }
@@ -939,18 +941,12 @@ scan_repos() {
 
             print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name${BRANCHES:+ ($target_branch)}"
 
-            # With --branches, a row is a branch: link to it.
-            local row_url="$repo_url"
-            if [[ -n "$BRANCHES" ]]; then
-                row_url="$repo_url/tree/$(url_encode "$target_branch")"
-            fi
-
             # One row per directory with a dependency file.
             local dirs dir
             if [[ -n "$ALTERNATIVE_PATHS" ]]; then
                 dirs=$(matching_dirs "$repo_name" "$target_branch")
                 if [[ -z "$dirs" ]]; then
-                    record_result "$row_url" "$visibility" "" "NOT_FOUND"
+                    record_result "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
                     continue
                 fi
             else
@@ -961,9 +957,9 @@ scan_repos() {
                 content=$(fetch_dependency_file "$repo_name" "$target_branch" "$dir")
                 # Without --alternativePaths, there is no PATH column.
                 if [[ "$content" == "NOT_FOUND" ]]; then
-                    record_result "$row_url" "$visibility" "" "$content"
+                    record_result "$repo_url" "$target_branch" "" "$visibility" "$content"
                 else
-                    record_result "$row_url" "$visibility" "$dir" "$content"
+                    record_result "$repo_url" "$target_branch" "$dir" "$visibility" "$content"
                 fi
             done <<< "$dirs"
         done
@@ -982,6 +978,10 @@ scan_repos() {
 # Print $2 in lines of at most $1 characters. Break at spaces where possible.
 wrap_text() {
     local width="$1" text="$2" line="" word
+    # A width below 1 would never end the loop below.
+    if [[ $width -lt 1 ]]; then
+        width=1
+    fi
     if [[ ${#text} -le $width ]]; then
         echo "$text"
         return
@@ -1015,6 +1015,10 @@ wrap_text() {
 # Like wrap_text, but break a path after a "/".
 wrap_path() {
     local width="$1" rest="$2" line="" part
+    # A width below 1 would never end the loop below.
+    if [[ $width -lt 1 ]]; then
+        width=1
+    fi
     while [[ -n "$rest" ]]; do
         if [[ "$rest" == */* ]]; then
             part="${rest%%/*}/"
@@ -1041,10 +1045,14 @@ wrap_path() {
 URL_COLUMN_WIDTH=55
 VERSION_COLUMN_WIDTH=15
 PATH_COLUMN_WIDTH=4
+BRANCH_COLUMN_WIDTH=6
 
 # Fit the columns to the longest values and to the terminal width.
+# If the row is too wide, shrink in this order: branch and path (they wrap
+# after a "/"), then the version (it wraps at spaces), then the URL (it gets
+# its own line, because a URL never wraps).
 set_column_widths() {
-    local i url_width=8 version_width=7 path_width=4
+    local i url_width=8 version_width=7 path_width=0 branch_width=0
     for i in "${!RESULT_URLS[@]}"; do
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
@@ -1052,40 +1060,64 @@ set_column_widths() {
         if [[ ${#RESULT_VERSIONS[$i]} -gt $version_width ]]; then
             version_width=${#RESULT_VERSIONS[$i]}
         fi
-        if [[ ${#RESULT_PATHS[$i]} -gt $path_width ]]; then
+        if show_path_column && [[ ${#RESULT_PATHS[$i]} -gt $path_width ]]; then
             path_width=${#RESULT_PATHS[$i]}
         fi
+        if show_branch_column && [[ ${#RESULT_BRANCHES[$i]} -gt $branch_width ]]; then
+            branch_width=${#RESULT_BRANCHES[$i]}
+        fi
     done
-    if [[ $path_width -gt $((TERM_COLUMNS / 3)) ]]; then
-        path_width=$((TERM_COLUMNS / 3))
+
+    # Space for the cells: the terminal width minus the gaps and the visibility.
+    # Keep the last column free: some terminals wrap a line that fills it.
+    local available=$((TERM_COLUMNS - 2))
+    if show_path_column; then
+        available=$((available - 1))
+        if [[ $path_width -lt 4 ]]; then
+            path_width=4
+        fi
+    fi
+    if show_branch_column; then
+        available=$((available - 1))
+        if [[ $branch_width -lt 6 ]]; then
+            branch_width=6
+        fi
+    fi
+    if [[ $SHOW_VISIBILITY -eq 1 ]]; then
+        available=$((available - 11))
     fi
 
-    # Keep at least 20 columns for the version and the visibility.
-    local visibility_width=0
-    if [[ $SHOW_VISIBILITY -eq 1 ]]; then
-        visibility_width=11
+    local over=$((url_width + branch_width + path_width + version_width - available))
+    local cut
+    if [[ $over -gt 0 && $branch_width -gt 12 ]]; then
+        cut=$((branch_width - 12 < over ? branch_width - 12 : over))
+        branch_width=$((branch_width - cut))
+        over=$((over - cut))
     fi
-    if show_path_column; then
-        visibility_width=$((visibility_width + path_width + 1))
+    if [[ $over -gt 0 && $path_width -gt 12 ]]; then
+        cut=$((path_width - 12 < over ? path_width - 12 : over))
+        path_width=$((path_width - cut))
+        over=$((over - cut))
     fi
-    local max_url_width=$((TERM_COLUMNS - 1 - 20 - visibility_width))
-    if [[ $url_width -gt $max_url_width ]]; then
-        url_width=$max_url_width
+    if [[ $over -gt 0 && $version_width -gt 10 ]]; then
+        cut=$((version_width - 10 < over ? version_width - 10 : over))
+        version_width=$((version_width - cut))
+        over=$((over - cut))
     fi
-    if [[ $url_width -lt 20 ]]; then
-        url_width=20
-    fi
-    local max_version_width=$((TERM_COLUMNS - url_width - 1 - visibility_width))
-    if [[ $version_width -gt $max_version_width ]]; then
-        version_width=$max_version_width
-    fi
-    if [[ $version_width -lt 10 ]]; then
-        version_width=10
+    if [[ $over -gt 0 && $url_width -gt 20 ]]; then
+        cut=$((url_width - 20 < over ? url_width - 20 : over))
+        url_width=$((url_width - cut))
     fi
 
     URL_COLUMN_WIDTH=$url_width
     VERSION_COLUMN_WIDTH=$version_width
     PATH_COLUMN_WIDTH=$path_width
+    BRANCH_COLUMN_WIDTH=$branch_width
+}
+
+# The BRANCH column: only with --branches.
+show_branch_column() {
+    [[ -n "$BRANCHES" ]]
 }
 
 # The PATH column shows where the file was found: only useful with --alternativePaths.
@@ -1093,25 +1125,35 @@ show_path_column() {
     [[ -n "$ALTERNATIVE_PATHS" ]]
 }
 
-# Arguments: color, URL, path, version, visibility
-# A path or version that is too wide wraps and stays in its column.
+# Arguments: color, URL, branch, path, version, visibility
+# A branch, path or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
 print_row() {
-    local -a url_lines=("$2") path_lines=() version_lines=()
+    local -a url_lines=("$2") branch_lines=() path_lines=() version_lines=()
     local line
     if [[ ${#2} -gt $URL_COLUMN_WIDTH ]]; then
         printf "%s%s%s\n" "$1" "$2" "$NC"
         url_lines=("")
     fi
-    while IFS= read -r line; do
-        path_lines+=("$line")
-    done < <(wrap_path "$PATH_COLUMN_WIDTH" "$3")
+    if show_branch_column; then
+        while IFS= read -r line; do
+            branch_lines+=("$line")
+        done < <(wrap_path "$BRANCH_COLUMN_WIDTH" "$3")
+    fi
+    if show_path_column; then
+        while IFS= read -r line; do
+            path_lines+=("$line")
+        done < <(wrap_path "$PATH_COLUMN_WIDTH" "$4")
+    fi
     while IFS= read -r line; do
         version_lines+=("$line")
-    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$4")
+    done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$5")
 
     local count=${#url_lines[@]}
+    if show_branch_column && [[ ${#branch_lines[@]} -gt $count ]]; then
+        count=${#branch_lines[@]}
+    fi
     if show_path_column && [[ ${#path_lines[@]} -gt $count ]]; then
         count=${#path_lines[@]}
     fi
@@ -1122,6 +1164,10 @@ print_row() {
     local i row cell
     for ((i = 0; i < count; i++)); do
         printf -v row "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
+        if show_branch_column; then
+            printf -v cell " %-*s" "$BRANCH_COLUMN_WIDTH" "${branch_lines[$i]:-}"
+            row+="$cell"
+        fi
         if show_path_column; then
             printf -v cell " %-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
             row+="$cell"
@@ -1130,7 +1176,7 @@ print_row() {
             printf -v cell " %-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
             row+="$cell"
             if [[ $i -eq 0 ]]; then
-                row+=" $5"
+                row+=" $6"
             fi
         else
             row+=" ${version_lines[$i]:-}"
@@ -1151,14 +1197,14 @@ print_results() {
 
     # Print header
     set_column_widths
-    print_row "$BOLD" "REPO URL" "PATH" "VERSION" "VISIBILITY"
-    print_row "" "--------" "----" "-------" "----------"
+    print_row "$BOLD" "REPO URL" "BRANCH" "PATH" "VERSION" "VISIBILITY"
+    print_row "" "--------" "------" "----" "-------" "----------"
 
     local has_results=0
 
-    # Sort the rows by URL, then path. The index is the last field.
+    # Sort the rows by URL, branch and path. The index is the last field.
     local sorted_rows
-    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_PATHS[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
+    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
 
     # Group the rows: version below, version above (or found), package not found, no file.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
@@ -1178,6 +1224,7 @@ print_results() {
         local version="${RESULT_VERSIONS[$i]}"
         local visibility="${RESULT_VISIBILITY[$i]}"
         local path="${RESULT_PATHS[$i]}"
+        local branch="${RESULT_BRANCHES[$i]}"
 
         case "$status" in
             below) row_group="VERSION BELOW" ;;
@@ -1194,18 +1241,18 @@ print_results() {
 
         # Repos at or above the version do not count as results.
         if [[ "$status" == "below" ]]; then
-            print_row "$RED" "$url" "$path" "$version" "$visibility"
+            print_row "$RED" "$url" "$branch" "$path" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "ok" ]]; then
-            print_row "$GREEN" "$url" "$path" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$path" "$version" "$visibility"
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$path" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$path" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            print_row "$YELLOW" "$url" "$path" "$version" "$visibility"
+            print_row "$YELLOW" "$url" "$branch" "$path" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            print_row "$CYAN" "$url" "$path" "$version" "$visibility"
+            print_row "$CYAN" "$url" "$branch" "$path" "$version" "$visibility"
             has_results=1
         fi
     done
