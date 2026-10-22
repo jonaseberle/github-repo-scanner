@@ -385,11 +385,11 @@ gh_cached() {
         if [[ $status -eq 0 ]]; then
             break
         fi
-        # A red "x" replaces the dot of the failed attempt.
-        if [[ -t 2 ]]; then
-            printf '\b%sx%s' "$RED" "$NC" >&2
-        fi
         if is_rate_limited "$output" && [[ $limit_waits -lt 5 ]]; then
+            # A "z" replaces the dot: not an error, the scan waits for the rate limit.
+            if [[ -t 2 ]]; then
+                printf '\b%sz%s' "$YELLOW" "$NC" >&2
+            fi
             limit_waits=$((limit_waits + 1))
             attempt=$((attempt - 1))
             if [[ "$output" == *"secondary rate limit"* ]]; then
@@ -402,9 +402,11 @@ gh_cached() {
             fi
             continue
         fi
+        # Not retried (e.g. a 404, "no such file"): the dot stays.
         if [[ $attempt -ge 4 ]] || ! is_retryable_error "$output"; then
             break
         fi
+        mark_failed_attempt
         log WARN "Retry in $((attempt * 2)) s: ${output##*$'\n'}"
         sleep $((attempt * 2))
     done
@@ -459,6 +461,10 @@ acquire_lock() {
         fi
         if [[ $waited -eq 0 ]]; then
             log DEBUG "waiting for the lock of process ${holder:-?}: $2"
+            # A "~": another scan fetches this entry, this one waits for it.
+            if [[ -t 2 ]]; then
+                printf '%s~%s' "$YELLOW" "$NC" >&2
+            fi
         fi
         LOCK_WAITED=1
         waited=$((waited + 1))
@@ -544,6 +550,14 @@ remove_temp_files() {
             rm -f "$tmp"
         fi
     done < <(find "$CACHE_DIR" -type f -name '*.tmp.*')
+}
+
+# A red "x" replaces the dot of an attempt that failed with a network or
+# GitHub error and is sent again.
+mark_failed_attempt() {
+    if [[ -t 2 ]]; then
+        printf '\b%sx%s' "$RED" "$NC" >&2
+    fi
 }
 
 # Print the HTTP status of a failed gh call, or nothing. gh ends a line with
@@ -661,6 +675,10 @@ pace_requests() {
         check_rate_limit
     elif [[ $((left * 5)) -lt $limit && $reset -gt $now ]]; then
         log DEBUG "Rate limit: $left of $limit left, $(((reset - now) / left)) s per request until the reset"
+        # A "z": the scan slows down for the rate limit.
+        if [[ -t 2 ]]; then
+            printf '%sz%s' "$YELLOW" "$NC" >&2
+        fi
         sleep $(((reset - now) / left))
     fi
 }
