@@ -100,6 +100,7 @@ TOTAL_REPOS=0
 AFFECTED_COUNT=0
 FOUND_COUNT=0
 NO_FILE_COUNT=0
+PARSE_ERROR_COUNT=0
 NOT_FOUND_COUNT=0
 BRANCHES_SCANNED=0
 NO_BRANCH_COUNT=0
@@ -301,9 +302,13 @@ print_warning() {
 PROGRESS_SHOWN=0
 
 # Arguments: pairs of color and text.
+# On stderr and only on a terminal, like the dots: stdout can go to a file.
 # Cut the line to the terminal width: a wrapped line is not cleared by "\r".
 # Keep room for the dots of the network requests.
 print_progress() {
+    if [[ ! -t 2 ]]; then
+        return 0
+    fi
     PROGRESS_SHOWN=1
     local max=$((TERM_COLUMNS - 12)) used=0 out="" color text keep
     while [[ $# -ge 2 ]]; do
@@ -321,7 +326,14 @@ print_progress() {
         out+="$color$text$NC"
         used=$((used + ${#text}))
     done
-    printf '\r\033[K%s ' "$out"
+    printf '\r\033[K%s ' "$out" >&2
+}
+
+clear_progress() {
+    if [[ $PROGRESS_SHOWN -eq 1 ]]; then
+        printf '\r\033[K' >&2
+        PROGRESS_SHOWN=0
+    fi
 }
 
 # Space-separated, in the order they are tried.
@@ -1610,8 +1622,7 @@ prefetch_dependency_files() {
         prefetch_batch "$batch" "$files" "$response"
     done
     rm -f "$response"
-    echo -ne "\r\033[K"
-    PROGRESS_SHOWN=0
+    clear_progress
 }
 
 # Fetch the lines "name<TAB>branch<TAB>commit or empty" of $1 with one
@@ -1726,8 +1737,7 @@ on_scan_interrupt() {
     trap - INT
     SCAN_INTERRUPTED=1
     log WARN "Interrupted (Ctrl-C) in repo $SCAN_POSITION/$TOTAL_REPOS: printing the results so far."
-    echo -ne "\r\033[K"
-    PROGRESS_SHOWN=0
+    clear_progress
     print_results
     exit 130
 }
@@ -1747,7 +1757,7 @@ record_result() {
     elif [[ "$value" == "PARSE_ERROR" ]]; then
         version_str="Parse error"
         status="error"
-        NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
+        PARSE_ERROR_COUNT=$((PARSE_ERROR_COUNT + 1))
     elif [[ "$value" == "NOT_IN_FILE" ]]; then
         version_str="Not found"
         status="not_in_file"
@@ -1918,9 +1928,7 @@ scan_repos() {
     done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, (.defaultBranchRef.name // "main")] | @tsv')
     trap - INT
 
-    # Clear progress line
-    echo -ne "\r\033[K"
-    PROGRESS_SHOWN=0
+    clear_progress
 }
 
 #===============================================================================
@@ -2331,6 +2339,9 @@ print_results() {
         absent_note=" (hidden)"
     fi
     echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
+    if [[ $PARSE_ERROR_COUNT -gt 0 ]]; then
+        echo -e "  - Dependency files that are not valid JSON: ${YELLOW}$PARSE_ERROR_COUNT${NC}"
+    fi
     if [[ $LOCK_CONFLICT_COUNT -gt 0 ]]; then
         echo -e "  - Directories with package-lock.json and yarn.lock: ${YELLOW}$LOCK_CONFLICT_COUNT${NC}"
     fi
@@ -2355,7 +2366,7 @@ print_results() {
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         complete="NOT complete"
     fi
-    log INFO "Done ($complete): ${#RESULT_STATUS[@]} rows, $AFFECTED_COUNT affected, $FOUND_COUNT found, $NO_FILE_COUNT without file, $NOT_FOUND_COUNT without package; $cache_hits of $requests requests from the cache"
+    log INFO "Done ($complete): ${#RESULT_STATUS[@]} rows, $AFFECTED_COUNT affected, $FOUND_COUNT found, $NO_FILE_COUNT without file, $PARSE_ERROR_COUNT parse errors, $NOT_FOUND_COUNT without package; $cache_hits of $requests requests from the cache"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         echo ""
         echo -e "${RED}${BOLD}Scanning NOT complete.${NC}"
@@ -2415,6 +2426,12 @@ main() {
 
 
     parse_affected
+
+    # A number of seconds, as "sleep" takes it.
+    if [[ ! "$DELAY" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        print_error "--delay needs a number of seconds, e.g. --delay=0.5."
+        exit 1
+    fi
 
     if [[ -n "$BRANCH" && -n "$BRANCHES" ]]; then
         print_error "Use either --branch or --branches."
