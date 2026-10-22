@@ -42,6 +42,7 @@ LOG_FILE="./var/log/gh-dep-scanner.log"
 # At startup, a log of this size or more is cut to its newer half.
 LOG_MAX_BYTES=$((20 * 1024 * 1024))
 USE_CACHE=1
+OFFLINE=0
 # Terminal width, for the progress line and the result table.
 TERM_COLUMNS=$(tput cols 2>/dev/null || echo 80)
 # One line per request: "cache <mtime>" or "network".
@@ -76,6 +77,7 @@ BRANCHES_SCANNED=0
 NO_BRANCH_COUNT=0
 MERGED_COUNT=0
 FILTERED_OUT_COUNT=0
+REFRESHED_COUNT=0
 # Stays empty for a single repository.
 ARCHIVED_COUNT=""
 
@@ -160,6 +162,9 @@ ${BOLD}OPTIONS:${NC}
 
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
+
+    --offline           Optional: use the cached repository list and do not
+                        check for pushes. Once cached, a scan needs no network.
 
     --no-cache          Optional: do not read the cache in ./var/cache.
                         New responses are still written to it.
@@ -562,6 +567,9 @@ parse_args() {
             --no-cache)
                 USE_CACHE=0
                 ;;
+            --offline)
+                OFFLINE=1
+                ;;
             -v|--verbose)
                 set -x
                 ;;
@@ -722,17 +730,17 @@ fetch_repos() {
     local repos_json
     if [[ "$OWNER_TYPE" == "repo" ]]; then
         # Wrap in an array to get the same shape as "gh repo list".
-        repos_json=$(gh_cached "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef --jq '[.]') || {
+        repos_json=$(refresh_unless_offline; gh_cached "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef,pushedAt --jq '[.]') || {
             print_error "Failed to fetch repository: $OWNER/$REPO"
             exit 1
         }
     elif [[ "$OWNER_TYPE" == "org" ]]; then
-        repos_json=$(gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef) || {
+        repos_json=$(refresh_unless_offline; gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef,pushedAt) || {
             print_error "Failed to fetch repositories for organization: $OWNER"
             exit 1
         }
     else
-        repos_json=$(gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef) || {
+        repos_json=$(refresh_unless_offline; gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef,pushedAt) || {
             print_error "Failed to fetch repositories for user: $OWNER"
             exit 1
         }
@@ -760,6 +768,10 @@ fetch_repos() {
     REPOS_DATA="$repos_json"
     TOTAL_REPOS=$(echo "$repos_json" | jq 'length')
 
+    if [[ $OFFLINE -eq 0 ]]; then
+        refresh_pushed_repos
+    fi
+
     if [[ "$TOTAL_REPOS" -eq 0 ]]; then
         if [[ -n "$REPO_FILTER" ]]; then
             print_warning "No repository of $OWNER matches --repo='$REPO_FILTER'"
@@ -771,6 +783,40 @@ fetch_repos() {
 
     log INFO "Repositories of $OWNER_TYPE $OWNER: $TOTAL_REPOS to scan, ${ARCHIVED_COUNT:-0} archived, $FILTERED_OUT_COUNT not matching --repo"
     print_success "Found $TOTAL_REPOS repositories."
+}
+
+# The repository list must be fresh: its push times tell which cache
+# entries are outdated. --offline uses the cached list.
+# Call it in the subshell of the request: it changes USE_CACHE.
+refresh_unless_offline() {
+    if [[ $OFFLINE -eq 0 ]]; then
+        USE_CACHE=0
+    fi
+}
+
+# Delete the cache entries of each repository that are older than its last
+# push. Entries written after the push stay, also those of a parallel scan.
+refresh_pushed_repos() {
+    local name pushed_at dir stamp outdated reference
+    reference=$(mktemp)
+    while IFS=$'\t' read -r name pushed_at; do
+        dir="$CACHE_DIR/api/repos/$OWNER/$name"
+        if [[ ! -d "$dir" || -z "$pushed_at" ]]; then
+            continue
+        fi
+        # "2026-10-22T18:53:33Z" -> "202610221853.33", the format of touch -t.
+        stamp="${pushed_at//[-:T]/}"
+        stamp="${stamp%Z}"
+        TZ=UTC touch -t "${stamp:0:12}.${stamp:12:2}" "$reference"
+        # Short option: BSD wc (macOS) has no --lines.
+        outdated=$(find "$dir" -type f ! -newer "$reference" | wc -l)
+        if [[ $outdated -gt 0 ]]; then
+            find "$dir" -type f ! -newer "$reference" -exec rm -f {} +
+            REFRESHED_COUNT=$((REFRESHED_COUNT + 1))
+            log INFO "Cache of $OWNER/$name: $((outdated)) entries older than the push at $pushed_at removed"
+        fi
+    done < <(echo "$REPOS_DATA" | jq -r '.[] | "\(.name)\t\(.pushedAt // "")"')
+    rm -f "$reference"
 }
 
 #===============================================================================
@@ -1666,6 +1712,11 @@ print_results() {
     if [[ -n "$ARCHIVED_COUNT" ]]; then
         echo "  - Archived repos: $ARCHIVED_COUNT"
     fi
+    if [[ $OFFLINE -eq 1 ]]; then
+        echo "  - Cache: offline (pushes are not checked)"
+    else
+        echo "  - Cache: $REFRESHED_COUNT repos with new pushes refreshed"
+    fi
     # With --branches, the counts are per branch.
     local rows="Repos"
     if [[ -n "$BRANCHES" ]]; then
@@ -1783,7 +1834,7 @@ main() {
         print_info "Not reading the cache (--no-cache). New responses are written to $CACHE_DIR."
     fi
 
-    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE delay=$DELAY"
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE offline=$OFFLINE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"
