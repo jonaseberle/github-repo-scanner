@@ -242,22 +242,27 @@ The repository root is searched first, then `app`, then `src/web`.
 
 ## Cache
 
-Each GitHub request is cached in `./var/cache` (relative to the current directory). The path of an entry is the request:
+Each GitHub request is cached in `./var/cache` (relative to the current directory):
 
 ```
-var/cache/repo-list/YOUR_ORG                                          gh repo list YOUR_ORG ...
-var/cache/repo-view/OWNER/REPO                                        gh repo view OWNER/REPO ...
-var/cache/api/orgs/NAME                                               gh api orgs/NAME
-var/cache/api/repos/OWNER/REPO/contents/composer.lock?ref=main        gh api repos/OWNER/REPO/contents/composer.lock?ref=main
-var/cache/api/repos/OWNER/REPO/contents/package-lock.json?ref=main.404
+var/cache/
+    repo-list/YOUR_ORG                          gh repo list YOUR_ORG ...
+    repo-view/OWNER/REPO                        gh repo view OWNER/REPO ...
+    api/orgs/NAME                               gh api orgs/NAME
+    api/repos/OWNER/REPO/
+        branches?per_page=100                   gh api --paginate repos/OWNER/REPO/branches?per_page=100
+        ref/main/composer.lock                  gh api repos/OWNER/REPO/contents/composer.lock?ref=main
+        ref/feat/x/composer.lock                gh api repos/OWNER/REPO/contents/composer.lock?ref=feat/x
+        ref/feat/x/webroot/composer.lock.404    gh api repos/OWNER/REPO/contents/webroot/composer.lock?ref=feat/x
 ```
 
+- Files are cached by branch first: all files of a branch are below `ref/<branch>/`. The branch name is not encoded, so `feat/x` is a directory `feat/` with `x/` in it.
 - A file that does not exist is cached too, with the suffix `.404`. Once a request is cached, a scan uses only local data.
 - Other errors (rate limit, authentication, network) are not cached.
-- A `/` in a branch name stays, so each branch prefix is a directory, e.g. `composer.lock?ref=feat/`. Other special characters (`%`, `#`, `&`, `+`, `?`, space) are percent-encoded, as in the request.
-- The branch list of a repository (for `--branches`) is cached as `api/repos/OWNER/REPO/branches?per_page=100`. Delete it to see new branches.
 - Entries do not expire. To fetch some requests again, delete their entries, for example:
   - `rm var/cache/repo-list/YOUR_ORG` to see new repositories
+  - `rm "var/cache/api/repos/OWNER/REPO/branches?per_page=100"` to see new branches
+  - `rm -r var/cache/api/repos/OWNER/REPO/ref/feat/x` to scan one branch again
   - `rm -r var/cache/api/repos/OWNER/REPO` to scan one repository again
 - To fetch everything again, use `--no-cache` or delete `var/cache`.
 
