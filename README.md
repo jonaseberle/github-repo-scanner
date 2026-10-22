@@ -254,7 +254,7 @@ var/cache/api/repos/OWNER/REPO/contents/package-lock.json?ref=main.404
 
 - A file that does not exist is cached too, with the suffix `.404`. Once a request is cached, a scan uses only local data.
 - Other errors (rate limit, authentication, network) are not cached.
-- A `/` in a branch name is stored as `%2F`.
+- A `/` in a branch name stays, so each branch prefix is a directory, e.g. `composer.lock?ref=feat/`. Other special characters (`%`, `#`, `&`, `+`, `?`, space) are percent-encoded, as in the request.
 - The branch list of a repository (for `--branches`) is cached as `api/repos/OWNER/REPO/branches?per_page=100`. Delete it to see new branches.
 - Entries do not expire. To fetch some requests again, delete their entries, for example:
   - `rm var/cache/repo-list/YOUR_ORG` to see new repositories
