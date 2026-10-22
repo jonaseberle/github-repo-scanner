@@ -27,6 +27,9 @@ ALTERNATIVE_PATHS=""
 SHOW_VISIBILITY=0
 CACHE_DIR="./var/cache"
 USE_CACHE=1
+# One line per request: "cache <mtime>" or "network".
+# A file, because gh_cached runs in subshells.
+REQUEST_LOG=""
 URL=""
 REPO=""
 TYPE=""
@@ -178,16 +181,19 @@ gh_cached() {
     shift
 
     if [[ $USE_CACHE -eq 1 && -f "$file" ]]; then
+        echo "cache $(file_mtime "$file")" >> "$REQUEST_LOG"
         cat "$file"
         return 0
     fi
     if [[ $USE_CACHE -eq 1 && -f "$file.404" ]]; then
+        echo "cache $(file_mtime "$file.404")" >> "$REQUEST_LOG"
         cat "$file.404"
         return 1
     fi
 
     local output status=0
     output=$(gh "$@" 2>&1) || status=$?
+    echo "network" >> "$REQUEST_LOG"
     # Rate limiting delay
     sleep "$DELAY"
 
@@ -200,6 +206,24 @@ gh_cached() {
     fi
     printf '%s\n' "$output"
     return $status
+}
+
+# GNU stat first, then BSD stat (macOS).
+file_mtime() {
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"
+}
+
+format_age() {
+    local seconds="$1"
+    if [[ $seconds -ge 86400 ]]; then
+        echo "$((seconds / 86400))d $((seconds % 86400 / 3600))h"
+    elif [[ $seconds -ge 3600 ]]; then
+        echo "$((seconds / 3600))h $((seconds % 3600 / 60))m"
+    elif [[ $seconds -ge 60 ]]; then
+        echo "$((seconds / 60))m $((seconds % 60))s"
+    else
+        echo "${seconds}s"
+    fi
 }
 
 # Short options only: BSD mkdir and mv (macOS) have no long options.
@@ -825,6 +849,18 @@ print_results() {
     fi
     echo -e "  - Repos without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}"
     echo -e "  - Repos without $PACKAGE in dependencies: ${CYAN}$NOT_FOUND_COUNT${NC}"
+
+    local requests cache_hits oldest
+    read -r requests cache_hits oldest <<< "$(awk '
+        { requests++ }
+        $1 == "cache" { hits++; if (oldest == "" || $2 < oldest) oldest = $2 }
+        END { print requests + 0, hits + 0, oldest }
+    ' "$REQUEST_LOG")"
+    if [[ $cache_hits -gt 0 ]]; then
+        echo "  - Requests served from the cache: $cache_hits of $requests (oldest entry: $(format_age $(($(date +%s) - oldest))) old)"
+    else
+        echo "  - Requests served from the cache: 0 of $requests"
+    fi
     echo ""
 }
 
@@ -835,6 +871,9 @@ print_results() {
 main() {
     # Parse command line arguments
     parse_args "$@"
+
+    REQUEST_LOG=$(mktemp)
+    trap 'rm -f "$REQUEST_LOG"' EXIT
 
     # Check prerequisites
     check_prerequisites
