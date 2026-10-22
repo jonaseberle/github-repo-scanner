@@ -163,6 +163,10 @@ EOF
 }
 
 print_error() {
+    # The progress line has no line break at its end.
+    if [[ $PROGRESS_SHOWN -eq 1 ]]; then
+        echo "" >&2
+    fi
     echo -e "${RED}Error: $1${NC}" >&2
 }
 
@@ -178,9 +182,12 @@ print_warning() {
     echo -e "${YELLOW}$1${NC}"
 }
 
+PROGRESS_SHOWN=0
+
 # Cut the line to the terminal width: a wrapped line is not cleared by "\r".
 # Keep room for the dots of the network requests.
 print_progress() {
+    PROGRESS_SHOWN=1
     local text="$1" max=$((TERM_COLUMNS - 12))
     if [[ ${#text} -gt $max ]]; then
         text="${text:0:$((max - 3))}..."
@@ -884,6 +891,7 @@ scan_repos() {
 
     # Clear progress line
     echo -ne "\r\033[K"
+    PROGRESS_SHOWN=0
 }
 
 #===============================================================================
