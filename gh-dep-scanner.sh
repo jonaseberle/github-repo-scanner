@@ -1510,7 +1510,8 @@ print_results() {
             not_affected) row_group="NOT AFFECTED" ;;
             found) row_group="VERSION FOUND" ;;
             not_in_file) row_group="PACKAGE NOT FOUND" ;;
-            *) row_group="N/A" ;;
+            no_file) row_group="VERSION FILE NOT FOUND ($(dep_file_names | sed 's/ /, /g'))" ;;
+            *) row_group="PARSE ERROR" ;;
         esac
         if [[ "$row_group" != "$group" ]]; then
             group="$row_group"

@@ -291,7 +291,7 @@ https://github.com/YOUR_ORG/project-alpha  livewire/livewire ^3.2
 NOT AFFECTED
 https://github.com/YOUR_ORG/shop-backend   livewire/livewire ^4.0
 
-N/A
+VERSION FILE NOT FOUND (composer.lock)
 https://github.com/YOUR_ORG/client-portal                    N/A
 
 ================================================================================
@@ -306,7 +306,7 @@ Summary:
 
 ### Output Legend
 
-Rows are grouped: AFFECTED (version in an `--affected` range), NOT AFFECTED, VERSION FOUND (without `--affected`), PACKAGE NOT FOUND (package not in the dependency file) and N/A (no dependency file). Inside each group, rows are sorted by URL.
+Rows are grouped: AFFECTED (version in an `--affected` range), NOT AFFECTED, VERSION FOUND (without `--affected`), PACKAGE NOT FOUND (package not in the dependency file), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
 
 | Color | Meaning |
 |-------|---------|
