@@ -470,6 +470,8 @@ release_lock() {
 }
 
 # Remove the locks of this process, e.g. after Ctrl-C during a request.
+# Called by a trap.
+# shellcheck disable=SC2329
 remove_own_locks() {
     if [[ ! -d "$LOCK_DIR" ]]; then
         return 0
@@ -1525,6 +1527,8 @@ SCAN_POSITION=0
 SCAN_INTERRUPTED=0
 
 # Ctrl-C during the scan shows the results so far. A second Ctrl-C stops at once.
+# Called by a trap.
+# shellcheck disable=SC2329
 on_scan_interrupt() {
     trap - INT
     SCAN_INTERRUPTED=1
@@ -2203,5 +2207,6 @@ main() {
     print_results
 }
 
-# Run main function
-main "$@"
+# Run main function. "exit" on the same line: bash reads the script while it
+# runs it, so after main it must not read on in a file that changed meanwhile.
+main "$@"; exit $?
