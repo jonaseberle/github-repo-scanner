@@ -43,6 +43,8 @@ BELOW_COUNT=0
 FOUND_COUNT=0
 NO_FILE_COUNT=0
 NOT_FOUND_COUNT=0
+# Stays empty for a single repository.
+ARCHIVED_COUNT=""
 
 #===============================================================================
 # HELPER FUNCTIONS
@@ -401,6 +403,13 @@ fetch_repos() {
         }
     fi
 
+    if [[ "$OWNER_TYPE" != "repo" ]]; then
+        ARCHIVED_COUNT=$(gh repo list "$OWNER" --archived --limit 1000 --json name --jq 'length' 2>&1) || {
+            print_error "Failed to count archived repositories for $OWNER_TYPE: $OWNER"
+            exit 1
+        }
+    fi
+
     REPOS_DATA="$repos_json"
     TOTAL_REPOS=$(echo "$repos_json" | jq 'length')
 
@@ -752,6 +761,9 @@ print_results() {
     echo "================================================================================"
     echo -e "${BOLD}Summary:${NC}"
     echo "  - Total repos scanned: $TOTAL_REPOS"
+    if [[ -n "$ARCHIVED_COUNT" ]]; then
+        echo "  - Archived repos: $ARCHIVED_COUNT"
+    fi
     if [[ -n "$BELOW_VERSION" ]]; then
         echo -e "  - Repos with $PACKAGE below v$BELOW_VERSION: ${RED}$BELOW_COUNT${NC}"
     else

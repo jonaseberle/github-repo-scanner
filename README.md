@@ -222,6 +222,7 @@ https://github.com/YOUR_ORG/client-portal               N/A
 ================================================================================
 Summary:
   - Total repos scanned: 25
+  - Archived repos: 3
   - Repos with livewire/livewire below v4: 2
   - Repos without composer.lock: 5
   - Repos without livewire/livewire in dependencies: 10
