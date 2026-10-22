@@ -801,8 +801,9 @@ get_major_version() {
     fi
 
     # Remove common prefixes: ^, ~, >=, >, =, v
+    # Quote "~": unquoted, bash expands it to $HOME and nothing is removed.
     local cleaned="${version_constraint#^}"
-    cleaned="${cleaned#~}"
+    cleaned="${cleaned#\~}"
     cleaned="${cleaned#>=}"
     cleaned="${cleaned#>}"
     cleaned="${cleaned#<=}"
@@ -814,7 +815,7 @@ get_major_version() {
     if [[ "$cleaned" == *"|"* ]]; then
         cleaned="${cleaned%%|*}"
         cleaned="${cleaned#^}"
-        cleaned="${cleaned#~}"
+        cleaned="${cleaned#\~}"
         cleaned="${cleaned#>=}"
         cleaned="${cleaned#>}"
         cleaned="${cleaned#=}"
