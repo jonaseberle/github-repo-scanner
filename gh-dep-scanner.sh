@@ -96,9 +96,9 @@ ${BOLD}OPTIONS:${NC}
     --package=<name>    Package name to search for
                         Examples: livewire/livewire, laravel/framework, react
 
-    --below=<version>   Optional: find packages below this major version
+    --below=<version>   Optional: find packages below this version
                         Default: find all repos that have the package
-                        Example: 4 (finds all packages with major version < 4)
+                        Examples: 4 (finds all packages < 4.0.0), 2.1.3
 
     --repo=<regex>      Optional: check only the repositories whose name (without
                         the owner) matches this extended regular expression
@@ -507,8 +507,8 @@ interactive_mode() {
 
     # Version
     if [[ -z "$BELOW_VERSION" ]]; then
-        echo -e "${CYAN}Enter minimum major version to check against (press Enter to find all repos with the package):${NC}"
-        echo "  Example: 4 (will find all repos with major version < 4)"
+        echo -e "${CYAN}Enter minimum version to check against (press Enter to find all repos with the package):${NC}"
+        echo "  Example: 4 (will find all repos with version < 4.0.0), 2.1.3"
         read -r -p "> " BELOW_VERSION
         echo ""
     fi
@@ -785,18 +785,19 @@ extract_version() {
 # VERSION COMPARISON
 #===============================================================================
 
-get_major_version() {
+# Print the version of a constraint as "major minor patch". A missing part is 0.
+get_version() {
     local version_constraint="$1"
 
     # Handle special cases
     if [[ "$version_constraint" == "*" || "$version_constraint" == "latest" ]]; then
-        echo "0"
+        echo "0 0 0"
         return
     fi
 
     # Handle dev versions
     if [[ "$version_constraint" =~ ^dev- ]]; then
-        echo "0"
+        echo "0 0 0"
         return
     fi
 
@@ -827,26 +828,30 @@ get_major_version() {
         cleaned="${cleaned%% *}"
     fi
 
-    # Extract major version (first number before a dot or end)
-    if [[ "$cleaned" =~ ^([0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]}"
+    # Extract the version (e.g. "3.*" gives 3 0 0)
+    if [[ "$cleaned" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))? ]]; then
+        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[3]:-0} ${BASH_REMATCH[5]:-0}"
     else
-        echo "0"
+        echo "0 0 0"
     fi
 }
 
 is_below_version() {
-    local version_constraint="$1"
-    local target_major="$2"
+    local -a have wanted
+    read -r -a have <<< "$(get_version "$1")"
+    read -r -a wanted <<< "$(get_version "$2")"
 
-    local major
-    major=$(get_major_version "$version_constraint")
-
-    if [[ "$major" -lt "$target_major" ]]; then
-        return 0  # true, is below
-    else
-        return 1  # false, is not below
-    fi
+    # Compare major, then minor, then patch. "10#": a part like "08" is not octal.
+    local i
+    for i in 0 1 2; do
+        if (( 10#${have[$i]} < 10#${wanted[$i]} )); then
+            return 0  # true, is below
+        fi
+        if (( 10#${have[$i]} > 10#${wanted[$i]} )); then
+            return 1  # false, is not below
+        fi
+    done
+    return 1  # equal is not below
 }
 
 # Print the branches of a repository that match --branches, one per line.
@@ -1391,8 +1396,8 @@ main() {
         exit 1
     fi
 
-    if [[ -n "$BELOW_VERSION" && ! "$BELOW_VERSION" =~ ^[0-9]+$ ]]; then
-        print_error "Version must be a number (major version)."
+    if [[ -n "$BELOW_VERSION" && ! "$BELOW_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+        print_error "Version must be like 4, 4.1 or 4.1.2."
         exit 1
     fi
 
