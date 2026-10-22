@@ -54,7 +54,7 @@ You'll be prompted for:
 1. GitHub URL (org, personal or a single repository)
 2. Dependency type (composer/node/composerJson)
 3. Package name
-4. Minimum version to check against
+4. Minimum version to check against (optional)
 5. Branch (optional)
 
 ### CLI Flags
@@ -67,7 +67,8 @@ Options:
   --type <type>       Dependency type: "composer" (composer.lock), "composerJson"
                       (composer.json) or "node" (package.json)
   --package <name>    Package name to search for
-  --below <version>   Find packages below this major version
+  --below <version>   Optional: find packages below this major version
+                      (default: find all repos that have the package)
   --branch <name>     Optional: specific branch to check (default: repo's default)
   --delay <seconds>   Optional: delay between API requests (default: 1)
   --alternativePaths <path1[,path2,...]>
@@ -108,6 +109,15 @@ Options:
   --package laravel/framework \
   --below 10 \
   --branch develop
+```
+
+### Find all repos that use Livewire, in any version
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/orgs/YOUR_ORG/repositories" \
+  --type composer \
+  --package livewire/livewire
 ```
 
 ### Increase delay for large organizations (avoid rate limits)
@@ -196,14 +206,14 @@ Summary:
 
 ### Output Legend
 
-Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), NOT FOUND (package not in the dependency file) and N/A (no dependency file).
+Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), VERSION FOUND (package found, without `--below`), NOT FOUND (package not in the dependency file) and N/A (no dependency file).
 
 | Color | Meaning |
 |-------|---------|
 | Red | Package found below target version |
 | Yellow | No dependency file (composer.lock/composer.json/package.json) |
 | Cyan | Dependency file exists but package not found |
-| Green | Package found at or above target version |
+| Green | Package found at or above target version (or found at all, without `--below`) |
 
 ## Supported URL Formats
 

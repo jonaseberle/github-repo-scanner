@@ -40,6 +40,7 @@ declare -a RESULT_STATUS=()
 # Counters
 TOTAL_REPOS=0
 BELOW_COUNT=0
+FOUND_COUNT=0
 NO_FILE_COUNT=0
 NOT_FOUND_COUNT=0
 
@@ -75,7 +76,8 @@ ${BOLD}OPTIONS:${NC}
     --package <name>    Package name to search for
                         Examples: livewire/livewire, laravel/framework, react
 
-    --below <version>   Find packages below this major version
+    --below <version>   Optional: find packages below this major version
+                        Default: find all repos that have the package
                         Example: 4 (finds all packages with major version < 4)
 
     --branch <name>     Optional: specific branch to check
@@ -293,7 +295,7 @@ interactive_mode() {
 
     # Version
     if [[ -z "$BELOW_VERSION" ]]; then
-        echo -e "${CYAN}Enter minimum major version to check against:${NC}"
+        echo -e "${CYAN}Enter minimum major version to check against (press Enter to find all repos with the package):${NC}"
         echo "  Example: 4 (will find all repos with major version < 4)"
         read -r -p "> " BELOW_VERSION
         echo ""
@@ -539,7 +541,7 @@ is_below_version() {
 
 scan_repos() {
     echo ""
-    echo -e "${BOLD}Scanning $OWNER repositories for $PACKAGE < $BELOW_VERSION...${NC}"
+    echo -e "${BOLD}Scanning $OWNER repositories for $PACKAGE${BELOW_VERSION:+ < $BELOW_VERSION}...${NC}"
     if [[ -n "$BRANCH" ]]; then
         echo -e "Branch: ${CYAN}$BRANCH${NC}"
     else
@@ -592,6 +594,9 @@ scan_repos() {
                 version_str="Not found"
                 status="not_in_file"
                 NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
+            elif [[ -z "$BELOW_VERSION" ]]; then
+                status="found"
+                FOUND_COUNT=$((FOUND_COUNT + 1))
             else
                 # Check if below target version
                 if is_below_version "$version_str" "$BELOW_VERSION"; then
@@ -628,7 +633,7 @@ print_results() {
     dep_file_name=$(dep_file_name)
 
     echo ""
-    echo -e "${BOLD}Results: $PACKAGE in repositories (target version: $BELOW_VERSION)${NC}"
+    echo -e "${BOLD}Results: $PACKAGE in repositories${BELOW_VERSION:+ (target version: $BELOW_VERSION)}${NC}"
     echo "================================================================================"
     echo ""
 
@@ -638,10 +643,10 @@ print_results() {
 
     local has_results=0
 
-    # Group the rows: version below, version above, package not found, no file.
+    # Group the rows: version below, version above (or found), package not found, no file.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
     local ordered_rows="" wanted_status i
-    for wanted_status in below ok not_in_file no_file error; do
+    for wanted_status in below ok found not_in_file no_file error; do
         for i in "${!RESULT_STATUS[@]}"; do
             if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" ]]; then
                 ordered_rows+=" $i"
@@ -660,6 +665,7 @@ print_results() {
         case "$status" in
             below) row_group="VERSION BELOW" ;;
             ok) row_group="VERSION ABOVE" ;;
+            found) row_group="VERSION FOUND" ;;
             not_in_file) row_group="NOT FOUND" ;;
             *) row_group="N/A" ;;
         esac
@@ -675,6 +681,9 @@ print_results() {
             has_results=1
         elif [[ "$status" == "ok" ]]; then
             printf "${GREEN}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
+        elif [[ "$status" == "found" ]]; then
+            printf "${GREEN}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
+            has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
             printf "${YELLOW}%-55s %-20s %-15s %-10s${NC}\n" "$url" "$name" "$version" "$visibility"
             has_results=1
@@ -693,7 +702,11 @@ print_results() {
     echo "================================================================================"
     echo -e "${BOLD}Summary:${NC}"
     echo "  - Total repos scanned: $TOTAL_REPOS"
-    echo -e "  - Repos with $PACKAGE below v$BELOW_VERSION: ${RED}$BELOW_COUNT${NC}"
+    if [[ -n "$BELOW_VERSION" ]]; then
+        echo -e "  - Repos with $PACKAGE below v$BELOW_VERSION: ${RED}$BELOW_COUNT${NC}"
+    else
+        echo -e "  - Repos with $PACKAGE: ${GREEN}$FOUND_COUNT${NC}"
+    fi
     echo -e "  - Repos without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}"
     echo -e "  - Repos without $PACKAGE in dependencies: ${CYAN}$NOT_FOUND_COUNT${NC}"
     echo ""
@@ -711,7 +724,7 @@ main() {
     check_prerequisites
 
     # If required arguments are missing, enter interactive mode
-    if [[ -z "$URL" || -z "$TYPE" || -z "$PACKAGE" || -z "$BELOW_VERSION" ]]; then
+    if [[ -z "$URL" || -z "$TYPE" || -z "$PACKAGE" ]]; then
         interactive_mode
     fi
 
@@ -731,7 +744,7 @@ main() {
         exit 1
     fi
 
-    if ! [[ "$BELOW_VERSION" =~ ^[0-9]+$ ]]; then
+    if [[ -n "$BELOW_VERSION" && ! "$BELOW_VERSION" =~ ^[0-9]+$ ]]; then
         print_error "Version must be a number (major version)."
         exit 1
     fi
