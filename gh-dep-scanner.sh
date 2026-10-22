@@ -89,7 +89,8 @@ ${BOLD}OPTIONS:${NC}
     --branch <name>     Optional: specific branch to check
                         Default: repository's default branch
 
-    --delay <seconds>   Optional: delay between API requests (default: 1)
+    --delay <seconds>   Optional: delay after each network request (default: 1)
+                        Requests served from the cache do not wait.
                         Increase if hitting rate limits
 
     --alternativePaths <path1[,path2,...]>
@@ -187,6 +188,8 @@ gh_cached() {
 
     local output status=0
     output=$(gh "$@" 2>&1) || status=$?
+    # Rate limiting delay
+    sleep "$DELAY"
 
     if [[ $status -eq 0 ]]; then
         write_cache_entry "$file" "$output"
@@ -714,9 +717,6 @@ scan_repos() {
         RESULT_VERSIONS+=("$version_str")
         RESULT_VISIBILITY+=("$visibility")
         RESULT_STATUS+=("$status")
-
-        # Rate limiting delay
-        sleep "$DELAY"
 
     done < <(echo "$REPOS_DATA" | jq -c '.[]')
 
