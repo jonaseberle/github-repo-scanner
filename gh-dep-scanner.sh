@@ -315,17 +315,28 @@ gh_cached() {
     return $status
 }
 
-# Encode the characters that have a meaning in a URL ("/" stays).
-# Branch names can contain "#": unencoded, GitHub ignores the rest of the request.
+# Percent-encode all characters except letters, digits, "-", ".", "_", "~"
+# and "/" (it stays a path separator). Byte by byte: a branch name like
+# "51-produktübersicht" must not reach GitHub as raw UTF-8 (HTTP 400).
 url_encode() {
-    local s="$1"
-    s="${s//\%/%25}"
-    s="${s//\#/%23}"
-    s="${s//\&/%26}"
-    s="${s//+/%2B}"
-    s="${s//\?/%3F}"
-    s="${s// /%20}"
-    echo "$s"
+    local LC_ALL=C
+    local s="$1" out="" c i byte
+    for ((i = 0; i < ${#s}; i++)); do
+        c="${s:i:1}"
+        case "$c" in
+            [A-Za-z0-9._~/-]) out+="$c" ;;
+            *)
+                # bash 3.2 reads a byte above 127 as a negative number.
+                printf -v byte '%d' "'$c"
+                if [[ $byte -lt 0 ]]; then
+                    byte=$((byte + 256))
+                fi
+                printf -v c '%%%02X' "$byte"
+                out+="$c"
+                ;;
+        esac
+    done
+    echo "$out"
 }
 
 # GNU stat first, then BSD stat (macOS).
