@@ -145,7 +145,7 @@ print_warning() {
 }
 
 print_progress() {
-    echo -ne "\r${CYAN}$1${NC}"
+    echo -ne "\r\033[K${CYAN}$1${NC}"
 }
 
 # Space-separated, in the order they are tried.
