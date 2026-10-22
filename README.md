@@ -141,6 +141,16 @@ Options:
   --below 10
 ```
 
+### Check the constraint in composer.json instead of the installed version
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/orgs/YOUR_ORG/repositories" \
+  --type composerJson \
+  --package livewire/livewire \
+  --below 4
+```
+
 ## Sample Output
 
 ```
@@ -157,7 +167,7 @@ https://github.com/YOUR_ORG/marketing-site        marketing-site    ~3.1.0      
 Summary:
   - Total repos scanned: 25
   - Repos with livewire/livewire below v4: 2
-  - Repos without composer.json: 5
+  - Repos without composer.lock: 5
   - Repos without livewire/livewire in dependencies: 10
 ```
 
@@ -194,6 +204,7 @@ The script extracts the major version from common constraint formats:
 | `3.*` | 3 | Yes |
 | `^4.0` | 4 | No |
 | `4.1.2` | 4 | No |
+| `v3.5.2` (from `composer.lock`) | 3 | Yes |
 | `*` | 0 | Yes (conservative) |
 | `dev-main` | 0 | Yes (conservative) |
 
