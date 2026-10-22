@@ -154,6 +154,19 @@ Options:
   --below 4
 ```
 
+### Also search subdirectories for the dependency file
+
+The repository root is searched first, then `app`, then `src/web`.
+
+```bash
+./gh-dep-scanner.sh \
+  --url "https://github.com/orgs/YOUR_ORG/repositories" \
+  --type composer \
+  --package typo3/cms-core \
+  --below 12 \
+  --alternativePaths app,src/web
+```
+
 ## Sample Output
 
 ```
