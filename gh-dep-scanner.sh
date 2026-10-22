@@ -25,6 +25,10 @@ COLOR_PATH=$'\033[0;34m'
 COLOR_VERSION=$'\033[1m'
 COLOR_VISIBILITY=$'\033[2m'
 COLOR_PACKAGE=$'\033[4m'
+# The version with --affected: bold like COLOR_VERSION, red or green. One code
+# each: "$BOLD$RED" would end the bold, the "0;" of RED resets it.
+COLOR_AFFECTED=$'\033[1;31m'
+COLOR_NOT_AFFECTED=$'\033[1;32m'
 
 # Default values
 DELAY=0
@@ -1836,6 +1840,10 @@ set_column_widths() {
     # Space for the cells: the terminal width minus the gaps and the visibility.
     # Keep the last column free: some terminals wrap a line that fills it.
     local available=$((TERM_COLUMNS - 3))
+    # The " *" of an affected row.
+    if [[ -n "$AFFECTED" ]]; then
+        available=$((available - 2))
+    fi
     if show_path_column; then
         available=$((available - 1))
         if [[ $path_width -lt 4 ]]; then
@@ -1896,7 +1904,8 @@ show_path_column() {
     [[ -n "$ALTERNATIVE_PATHS" ]]
 }
 
-# Arguments: color, URL, branch, path, package, version, visibility
+# Arguments: color, URL, branch, path, package, version, visibility, and
+# optionally the color of the version and a mark for the end of the row.
 # A branch, path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
@@ -1941,7 +1950,7 @@ print_row() {
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
-    local version_color="$COLOR_VERSION" visibility_color="$COLOR_VISIBILITY"
+    local version_color="${8:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY"
     if [[ -z "$1" || "$1" == "$BOLD" ]]; then
         branch_color="$1" path_color="$1" package_color="$1" version_color="$1" visibility_color="$1"
     fi
@@ -1972,6 +1981,9 @@ print_row() {
         else
             row+=" $version_color${version_lines[$i]:-}$NC"
         fi
+        if [[ $i -eq 0 && -n "${9:-}" ]]; then
+            row+=" $COLOR_AFFECTED$9$NC"
+        fi
         printf "%s\n" "$row"
     done
 }
@@ -1998,16 +2010,17 @@ print_results() {
     # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
     sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
 
-    # Group the rows: affected, not affected (or found), package not found, no file.
+    # Group the rows: version found, package not found, no file, parse error.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
     local ordered_rows="" wanted_status i
-    for wanted_status in affected not_affected found not_in_file no_file error; do
+    for wanted_status in found not_in_file no_file error; do
         # The summary still counts the hidden rows.
         if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
             continue
         fi
         for i in $sorted_rows; do
-            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" ]]; then
+            # FOUND has all rows with a version, affected by --affected or not.
+            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" || ( "$wanted_status" == "found" && "${RESULT_STATUS[$i]}" == *affected ) ]]; then
                 ordered_rows+=" $i"
             fi
         done
@@ -2024,9 +2037,7 @@ print_results() {
         local package="${RESULT_PACKAGES[$i]}"
 
         case "$status" in
-            affected) row_group="AFFECTED" ;;
-            not_affected) row_group="NOT AFFECTED" ;;
-            found) row_group="VERSION FOUND" ;;
+            affected | not_affected | found) row_group="FOUND" ;;
             not_in_file) row_group="PACKAGE NOT FOUND" ;;
             no_file) row_group="VERSION FILE NOT FOUND ($(dep_file_names | sed 's/ /, /g'))" ;;
             *) row_group="PARSE ERROR" ;;
@@ -2037,12 +2048,13 @@ print_results() {
             echo -e "${BOLD}$group${NC}"
         fi
 
-        # Repos at or above the version do not count as results.
+        # With --affected, the color of the version and a "*" at the end show
+        # whether it is affected. Not affected rows do not count as results.
         if [[ "$status" == "affected" ]]; then
-            print_row "$RED" "$url" "$branch" "$path" "$package" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*"
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED"
         elif [[ "$status" == "found" ]]; then
             print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
             has_results=1
