@@ -933,7 +933,7 @@ parse_github_url() {
     if [[ "$url" =~ github\.com/([^/?]+)$ ]]; then
         OWNER="${BASH_REMATCH[1]}"
         # Try to determine if it's an org or user
-        if gh_cached "api/orgs/$OWNER" api "orgs/$OWNER" &> /dev/null; then
+        if gh_cached "api/orgs/$OWNER?about" api "orgs/$OWNER" --jq "$REPOS_COUNT" &> /dev/null; then
             OWNER_TYPE="org"
         else
             OWNER_TYPE="user"
@@ -968,7 +968,12 @@ fetch_repos() {
     local repos_json
     if [[ "$OWNER_TYPE" == "repo" ]]; then
         # Wrap in an array to get the same shape as "gh repo list".
-        repos_json=$(refresh_unless_offline; gh_cached "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef,pushedAt --jq '[.]') || {
+        # Fresh: its push time tells which cache entries are outdated. --offline uses the cache.
+        local view=gh_fresh
+        if [[ $OFFLINE -eq 1 ]]; then
+            view=gh_cached
+        fi
+        repos_json=$("$view" "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef,pushedAt --jq '[.]') || {
             print_error "Failed to fetch repository: $OWNER/$REPO"
             exit 1
         }
@@ -1018,17 +1023,30 @@ fetch_repos() {
     print_success "Found $TOTAL_REPOS repositories."
 }
 
+# Like gh_cached, but fetch even if the entry is cached (and write it).
+gh_fresh() {
+    local USE_CACHE=0
+    gh_cached "$@"
+}
+
 # The REST fields of a repository, in the shape of "gh repo list --json".
-REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at}'
-# A full repository list at most this old (seconds); in between, only the
-# repositories with new pushes are fetched.
+REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at, updatedAt: .updated_at}'
+# The number of repositories of an org or user (jq, on "gh api orgs/NAME").
+# Nothing if GitHub does not give the private ones: this needs a token scope
+# (e.g. "user" for the own account, which a "gh auth login" does not ask for).
+REPOS_COUNT='if .owned_private_repos == null then empty else .public_repos + .owned_private_repos end'
+# Repositories per page when only the changes are fetched: one page of 100
+# takes about 2 s, one of 20 under 1 s, and usually a few repositories change.
+REPOS_CHANGES_PER_PAGE=20
+# Without the number, deleted repositories show only in a full list: fetch
+# one if the last one is older than this (seconds).
 REPOS_FULL_MAX_AGE=86400
 
-# The REST endpoint for the repositories of OWNER, newest push first.
+# The REST endpoint for the repositories of OWNER.
 # REST is about twice as fast as "gh repo list" (GraphQL).
 repos_endpoint() {
     if [[ "$OWNER_TYPE" == "org" ]]; then
-        echo "orgs/$OWNER/repos?type=all&per_page=100&sort=pushed&direction=desc"
+        echo "orgs/$OWNER/repos?type=all"
         return
     fi
     # Only the list of the logged-in user (user/repos) has the private repositories.
@@ -1036,61 +1054,89 @@ repos_endpoint() {
     # Not the key "api/user": it would be a file where "api/user/repos" needs a directory.
     login=$(gh_cached "api/user?login" api user --jq '.login') || login=""
     if [[ "$login" == "$OWNER" ]]; then
-        echo "user/repos?affiliation=owner&per_page=100&sort=pushed&direction=desc"
+        echo "user/repos?affiliation=owner"
     else
-        echo "users/$OWNER/repos?type=owner&per_page=100&sort=pushed&direction=desc"
+        echo "users/$OWNER/repos?type=owner"
     fi
+}
+
+# The number of repositories that GitHub has for OWNER (fresh).
+# Keys with "?": a key "api/orgs/NAME" would be a file where
+# "api/orgs/NAME/repos" needs a directory.
+repos_count() {
+    if [[ "$OWNER_TYPE" == "org" ]]; then
+        gh_fresh "api/orgs/$OWNER?about" api "orgs/$OWNER" --jq "$REPOS_COUNT"
+    elif [[ "$1" == user/* ]]; then
+        gh_fresh "api/user?count" api user --jq "$REPOS_COUNT"
+    else
+        # users/NAME/repos lists the public repositories only.
+        gh_fresh "api/users/$OWNER?count" api "users/$OWNER" --jq '.public_repos'
+    fi
+}
+
+# Print the repositories sorted by $1 (pushed, updated), newest first, page by
+# page up to the first one whose $2 (pushedAt, updatedAt) is the same in the
+# cached list: the older ones are the same too.
+# Uses endpoint, key and file of fetch_repo_list.
+changed_repos() {
+    local sort="$1" field="$2" page=1 lines unchanged
+    while true; do
+        lines=$(gh_fresh "$key.$sort" api "$endpoint&per_page=$REPOS_CHANGES_PER_PAGE&sort=$sort&direction=desc&page=$page" --jq ".[] | $REPO_FIELDS") || return 1
+        echo "$lines"
+        # --slurpfile, not --argjson: a long list must not be a command line argument.
+        unchanged=$(echo "$lines" | jq --slurp --slurpfile cached "$file" --arg field "$field" \
+            'any(.[]; . as $r | $cached | any(.name == $r.name and .[$field] == $r[$field]))')
+        if [[ -z "$lines" || "$unchanged" == "true" || $(echo "$lines" | awk 'END { print NR }') -lt $REPOS_CHANGES_PER_PAGE ]]; then
+            break
+        fi
+        page=$((page + 1))
+    done
+    log INFO "Repository list: $page page(s) sorted by $sort"
 }
 
 # Print the repositories of OWNER as a JSON array.
-# A full list (all pages) is fetched if the cached one is older than
-# REPOS_FULL_MAX_AGE or with --no-cache. In between, only the pages up to the
-# first repository with an unchanged push time are fetched, usually one.
-# Archiving, renaming and deleting do not change the push time: the next
-# full list shows them. --offline uses the cached list.
+# With a cached list, only the changes are fetched: the repositories with new
+# pushes (sorted by pushed) and with other changes such as archiving or
+# renaming (sorted by updated; a push does not always change updated_at).
+# Usually one page each. A deleted repository is in no page: if the number
+# of repositories on GitHub differs from the merged list, the full list is
+# fetched. If GitHub does not give the number, a full list is fetched once
+# in REPOS_FULL_MAX_AGE. --offline uses the cached list.
 fetch_repo_list() {
-    local endpoint key file full listing
+    local endpoint key file listing
     endpoint=$(repos_endpoint)
     key="api/${endpoint%%\?*}"
     file="$CACHE_DIR/$key"
-    full="$file.full"
+    local full_request="$endpoint&per_page=100&sort=pushed&direction=desc" full="$CACHE_DIR/$key.full"
 
-    if [[ $OFFLINE -eq 0 && ( $USE_CACHE -eq 0 || ! -f "$file" || ! -f "$full" || $(($(date +%s) - $(file_mtime "$full"))) -ge $REPOS_FULL_MAX_AGE ) ]]; then
+    if [[ $OFFLINE -eq 1 ]]; then
+        listing=$(gh_cached "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
+    elif [[ $USE_CACHE -eq 0 || ! -f "$file" ]]; then
         log INFO "Fetching the full repository list: $endpoint"
-        listing=$(USE_CACHE=0; gh_cached "$key" api --paginate "$endpoint" --jq ".[] | $REPO_FIELDS") || return 1
+        listing=$(gh_fresh "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
         write_cache_entry "$full" ""
-    elif [[ $OFFLINE -eq 0 ]]; then
-        local page=1 lines added="" unchanged
-        while true; do
-            lines=$(USE_CACHE=0; gh_cached "$key.page" api "$endpoint&page=$page" --jq ".[] | $REPO_FIELDS") || return 1
-            added+="$lines"$'\n'
-            # The list is sorted by push time: after an unchanged repository, all are unchanged.
-            # --slurpfile, not --argjson: a long list must not be a command line argument.
-            unchanged=$(echo "$lines" | jq --slurp --slurpfile cached "$file" \
-                'any(.[]; . as $r | $cached | any(.name == $r.name and .pushedAt == $r.pushedAt))')
-            if [[ -z "$lines" || "$unchanged" == "true" || $(echo "$lines" | awk 'END { print NR }') -lt 100 ]]; then
-                break
-            fi
-            page=$((page + 1))
-        done
-        log INFO "Repository list: $page page(s) with new pushes merged into the cached list"
-        # The new entries first: for a name, the first entry stays.
-        listing=$( (printf '%s' "$added"; cat "$file") | jq --slurp --compact-output \
-            'reduce .[] as $r ({}; if has($r.name) then . else .[$r.name] = $r end) | .[]')
-        write_cache_entry "$file" "$listing"
     else
-        listing=$(gh_cached "$key" api --paginate "$endpoint" --jq ".[] | $REPO_FIELDS") || return 1
+        local changed count
+        changed=$(changed_repos pushed pushedAt && changed_repos updated updatedAt) || return 1
+        # The changed entries first: for a name, the first entry stays.
+        listing=$( (printf '%s\n' "$changed"; cat "$file") | jq --slurp --compact-output \
+            'reduce .[] as $r ({}; if has($r.name) then . else .[$r.name] = $r end) | .[]')
+        count=$(repos_count "$endpoint") || count=""
+        local reason=""
+        if [[ -n "$count" && "$count" != "$(echo "$listing" | awk 'NF { n++ } END { print n + 0 }')" ]]; then
+            reason="GitHub has $count repositories, the merged list not"
+        elif [[ -z "$count" && ( ! -f "$full" || $(($(date +%s) - $(file_mtime "$full"))) -ge $REPOS_FULL_MAX_AGE ) ]]; then
+            reason="GitHub gives no number of repositories, and the last full list is older than $((REPOS_FULL_MAX_AGE / 3600)) h"
+        fi
+        if [[ -n "$reason" ]]; then
+            log INFO "Repository list: $reason: fetching the full list"
+            listing=$(gh_fresh "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
+            write_cache_entry "$full" ""
+        else
+            write_cache_entry "$file" "$listing"
+        fi
     fi
     echo "$listing" | jq --slurp '.'
-}
-
-# The repository list must be fresh: its push times tell which cache
-# entries are outdated. --offline uses the cached list.
-# Call it in the subshell of the request: it changes USE_CACHE.
-refresh_unless_offline() {
-    if [[ $OFFLINE -eq 0 ]]; then
-        USE_CACHE=0
-    fi
 }
 
 # Delete the cache entries of each repository that are older than its last
