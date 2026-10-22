@@ -70,7 +70,9 @@ ${BOLD}USAGE:${NC}
     ./gh-dep-scanner.sh                    # Interactive mode
 
 ${BOLD}OPTIONS:${NC}
-    --url <url>         GitHub URL (org or personal repos page, or one repo)
+    Options with a value take the form --option=value.
+
+    --url=<url>         GitHub URL (org or personal repos page, or one repo)
                         Examples:
                           https://github.com/orgs/MyOrg/repositories
                           https://github.com/username?tab=repositories
@@ -78,33 +80,34 @@ ${BOLD}OPTIONS:${NC}
                           https://github.com/orgs/MyOrg
                           https://github.com/owner/repo
 
-    --type <type>       Dependency type:
+    --type=<type>       Dependency type:
                           composer      installed version from composer.lock
                           composerJson  version constraint from composer.json
                           node          installed version from package-lock.json
                                         or yarn.lock
                           nodeJson      version constraint from package.json
 
-    --package <name>    Package name to search for
+    --package=<name>    Package name to search for
                         Examples: livewire/livewire, laravel/framework, react
 
-    --below <version>   Optional: find packages below this major version
+    --below=<version>   Optional: find packages below this major version
                         Default: find all repos that have the package
                         Example: 4 (finds all packages with major version < 4)
 
-    --branch <name>     Optional: specific branch to check
+    --branch=<name>     Optional: specific branch to check
                         Default: repository's default branch
 
-    --branches [regex]  Optional: check all branches that match this extended
+    --branches[=regex]  Optional: check all branches that match this extended
                         regular expression, instead of one branch.
                         Without a regex: check all branches.
-                        Examples: '^feat/|^upgrade/', 'typo3', 'upgrade$'
+                        Examples: --branches='^feat/|^upgrade/'
+                                  --branches=typo3 --branches='upgrade$'
 
-    --delay <seconds>   Optional: delay after each network request (default: 1)
+    --delay=<seconds>   Optional: delay after each network request (default: 1)
                         Requests served from the cache do not wait.
                         Increase if hitting rate limits
 
-    --alternativePaths <path1[,path2,...]>
+    --alternativePaths=<path1[,path2,...]>
                         Optional: directories to search for the dependency
                         file if it is not in the repository root.
                         They are tried in the given order.
@@ -126,23 +129,23 @@ ${BOLD}EXAMPLES:${NC}
     ./gh-dep-scanner.sh
 
     # Find repos with livewire < v4 in an organization
-    ./gh-dep-scanner.sh --url "https://github.com/orgs/YOUR_ORG/repositories" \\
-                        --type composer \\
-                        --package livewire/livewire \\
-                        --below 4
+    ./gh-dep-scanner.sh --url="https://github.com/orgs/YOUR_ORG/repositories" \\
+                        --type=composer \\
+                        --package=livewire/livewire \\
+                        --below=4
 
     # Find repos with react < v18 for a user
-    ./gh-dep-scanner.sh --url "https://github.com/USERNAME" \\
-                        --type node \\
-                        --package react \\
-                        --below 18
+    ./gh-dep-scanner.sh --url="https://github.com/USERNAME" \\
+                        --type=node \\
+                        --package=react \\
+                        --below=18
 
     # Specify a branch
-    ./gh-dep-scanner.sh --url "https://github.com/orgs/YOUR_ORG/repositories" \\
-                        --type composer \\
-                        --package laravel/framework \\
-                        --below 10 \\
-                        --branch develop
+    ./gh-dep-scanner.sh --url="https://github.com/orgs/YOUR_ORG/repositories" \\
+                        --type=composer \\
+                        --package=laravel/framework \\
+                        --below=10 \\
+                        --branch=develop
 
 ${BOLD}REQUIREMENTS:${NC}
     - gh (GitHub CLI) - must be installed and authenticated
@@ -299,68 +302,68 @@ check_prerequisites() {
 #===============================================================================
 
 parse_args() {
+    # Values only in the form --option=value: personal preference.
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --url)
-                URL="$2"
-                shift 2
+            --*=)
+                print_error "${1%=} needs a value: use $1<value>."
+                exit 1
                 ;;
-            --type)
-                TYPE="$2"
-                shift 2
+            --url=*)
+                URL="${1#*=}"
                 ;;
-            --package)
-                PACKAGE="$2"
-                shift 2
+            --type=*)
+                TYPE="${1#*=}"
                 ;;
-            --below)
-                BELOW_VERSION="$2"
-                shift 2
+            --package=*)
+                PACKAGE="${1#*=}"
                 ;;
-            --branch)
-                BRANCH="$2"
-                shift 2
+            --below=*)
+                BELOW_VERSION="${1#*=}"
+                ;;
+            --branch=*)
+                BRANCH="${1#*=}"
+                ;;
+            --branches=*)
+                BRANCHES="${1#*=}"
                 ;;
             --branches)
-                # The value is optional: without it, match all branches.
-                if [[ $# -ge 2 && "$2" != -* ]]; then
-                    BRANCHES="$2"
-                    shift 2
-                else
-                    BRANCHES="."
-                    shift
-                fi
+                # Without a value, match all branches.
+                BRANCHES="."
                 ;;
-            --delay)
-                DELAY="$2"
-                shift 2
+            --delay=*)
+                DELAY="${1#*=}"
                 ;;
-            --alternativePaths)
-                ALTERNATIVE_PATHS="$2"
-                shift 2
+            --alternativePaths=*)
+                ALTERNATIVE_PATHS="${1#*=}"
                 ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
-                shift
                 ;;
             --no-cache)
                 USE_CACHE=0
-                shift
                 ;;
             -v|--verbose)
                 set -x
-                shift
                 ;;
             --help)
                 show_help
                 exit 0
                 ;;
+            --url|--type|--package|--below|--branch|--delay|--alternativePaths)
+                print_error "$1 needs a value: use $1=<value>."
+                exit 1
+                ;;
             *)
                 print_error "Unknown option: $1"
+                if [[ "$1" != -* ]]; then
+                    echo "Values take the form --option=value, e.g. --type=composer."
+                fi
                 echo "Use --help for usage information."
                 exit 1
                 ;;
         esac
+        shift
     done
 }
 
