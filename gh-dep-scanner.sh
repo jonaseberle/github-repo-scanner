@@ -373,12 +373,17 @@ remove_temp_files() {
     done < <(find "$CACHE_DIR" -type f -name '*.tmp.*')
 }
 
-# Print the HTTP status of a failed gh call, or nothing. gh ends its output
-# with "... (HTTP 404)" or, without a message, with "gh: HTTP 400".
+# Print the HTTP status of a failed gh call, or nothing. gh ends a line with
+# "... (HTTP 404)" or, without a message, with "gh: HTTP 400". A hint can
+# follow on the next line (e.g. about token scopes): use the last such line.
 http_status() {
-    if [[ "$1" =~ HTTP\ ([0-9][0-9][0-9])\)?$ ]]; then
-        echo "${BASH_REMATCH[1]}"
-    fi
+    local line status=""
+    while IFS= read -r line; do
+        if [[ "$line" =~ HTTP\ ([0-9][0-9][0-9])\)?$ ]]; then
+            status="${BASH_REMATCH[1]}"
+        fi
+    done <<< "$1"
+    echo "$status"
 }
 
 # A GraphQL error has an "errors" list. Without an HTTP status and without
