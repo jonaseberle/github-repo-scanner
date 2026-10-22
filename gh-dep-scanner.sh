@@ -392,22 +392,21 @@ fetch_repos() {
             exit 1
         }
     elif [[ "$OWNER_TYPE" == "org" ]]; then
-        repos_json=$(gh repo list "$OWNER" --no-archived --limit 1000 --json name,url,isPrivate,defaultBranchRef 2>&1) || {
+        repos_json=$(gh repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef 2>&1) || {
             print_error "Failed to fetch repositories for organization: $OWNER"
             exit 1
         }
     else
-        repos_json=$(gh repo list "$OWNER" --no-archived --limit 1000 --json name,url,isPrivate,defaultBranchRef 2>&1) || {
+        repos_json=$(gh repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef 2>&1) || {
             print_error "Failed to fetch repositories for user: $OWNER"
             exit 1
         }
     fi
 
+    # Filter here: "gh repo list --no-archived" and "--archived" return incomplete lists.
     if [[ "$OWNER_TYPE" != "repo" ]]; then
-        ARCHIVED_COUNT=$(gh repo list "$OWNER" --archived --limit 1000 --json name --jq 'length' 2>&1) || {
-            print_error "Failed to count archived repositories for $OWNER_TYPE: $OWNER"
-            exit 1
-        }
+        ARCHIVED_COUNT=$(echo "$repos_json" | jq '[.[] | select(.isArchived)] | length')
+        repos_json=$(echo "$repos_json" | jq '[.[] | select(.isArchived | not)]')
     fi
 
     REPOS_DATA="$repos_json"
