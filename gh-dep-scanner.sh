@@ -133,7 +133,7 @@ ${BOLD}OPTIONS:${NC}
 
     --hide-merged       Optional, with --branches: hide the branches that are
                         fully merged into the default branch (one request per
-                        branch). Squash and rebase merges are not detected.
+                        100 branches). Squash and rebase merges are not detected.
 
     --delay=<seconds>   Optional: delay after each network request (default: 1)
                         Requests served from the cache do not wait.
@@ -353,9 +353,12 @@ remove_temp_files() {
     done < <(find "$CACHE_DIR" -type f -name '*.tmp.*')
 }
 
-# gh prints "(HTTP <status>)" for an HTTP error. Without it, the request did
-# not get a response.
+# gh prints "(HTTP <status>)" for an HTTP error. A GraphQL error has an
+# "errors" list. Without both, the request did not get a response.
 is_retryable_error() {
+    if [[ "$1" == *'"errors":['* ]]; then
+        return 1
+    fi
     if [[ "$1" =~ \(HTTP\ ([0-9]+)\) ]]; then
         [[ ${BASH_REMATCH[1]} -ge 500 ]]
     else
@@ -985,34 +988,29 @@ is_affected() {
 # With --hide-merged, a branch that is fully merged into the default branch
 # ($2) is printed as "merged<TAB>name".
 matching_branches() {
-    local request="repos/$OWNER/$1/branches?per_page=100"
-    local key="api/$request" filter='.[].name'
-    # The commit of each branch is only needed for --hide-merged.
+    local listing
     if [[ $HIDE_MERGED -eq 1 ]]; then
-        key="api/repos/$OWNER/$1/branches?per_page=100&sha"
-        filter='.[] | "\(.name)\t\(.commit.sha)"'
-    fi
-    local listing name sha
-    listing=$(gh_cached "$key" api --paginate "$request" --jq "$filter") || {
-        # Only a 404 means "no branches". Other errors must stop the scan.
-        if [[ "$listing" == *"(HTTP 404)"* ]]; then
-            return 0
-        fi
-        print_error "Failed to fetch the branches of $OWNER/$1: $listing"
-        exit 1
-    }
-
-    local default_sha=""
-    if [[ $HIDE_MERGED -eq 1 ]]; then
-        default_sha=$(echo "$listing" | awk -F '\t' -v name="$2" '$1 == name { print $2 }')
+        listing=$(branches_with_merge_state "$1" "$2")
+    else
+        local request="repos/$OWNER/$1/branches?per_page=100"
+        listing=$(gh_cached "api/$request" api --paginate "$request" --jq '.[].name') || {
+            # Only a 404 means "no branches". Other errors must stop the scan.
+            if [[ "$listing" == *"(HTTP 404)"* ]]; then
+                return 0
+            fi
+            print_error "Failed to fetch the branches of $OWNER/$1: $listing"
+            exit 1
+        }
     fi
 
     # Branch names contain no spaces, tabs or glob characters.
-    while IFS=$'\t' read -r name sha; do
+    local name behind
+    while IFS=$'\t' read -r name behind; do
         if [[ -z "$name" || ! "$name" =~ $BRANCHES ]]; then
             continue
         fi
-        if [[ -n "$default_sha" && "$name" != "$2" ]] && is_merged "$1" "$default_sha" "$sha"; then
+        # Nothing of the branch is missing in the default branch: it is merged.
+        if [[ "$behind" == "0" && "$name" != "$2" ]]; then
             printf 'merged\t%s\n' "$name"
         else
             echo "$name"
@@ -1020,22 +1018,28 @@ matching_branches() {
     done <<< "$listing"
 }
 
-# True if commit $3 is in commit $2 (nothing of $3 is ahead), in repository $1.
-# Compare by commit, not by branch name: the result never changes, so the
-# cache entry stays valid.
-is_merged() {
-    local request="repos/$OWNER/$1/compare/$2...$3"
-    local ahead_by
-    # per_page=1: the response would else list the commits.
-    ahead_by=$(gh_cached "api/$request" api "$request?per_page=1" --jq '.ahead_by') || {
-        # 404: e.g. no common history. Then the branch is not merged.
-        if [[ "$ahead_by" == *"(HTTP 404)"* ]]; then
-            return 1
-        fi
-        print_error "Failed to compare $3 with $2 in $OWNER/$1: $ahead_by"
+# Print "name<TAB>commits that are not in the default branch ($2)" for all
+# branches of repository $1. One GraphQL request per 100 branches, instead
+# of one comparison per branch.
+branches_with_merge_state() {
+    # $owner, $name, $base and $endCursor are GraphQL variables, not shell ones.
+    # shellcheck disable=SC2016
+    local query='query($owner: String!, $name: String!, $base: String!, $endCursor: String) {
+        repository(owner: $owner, name: $name) {
+            refs(refPrefix: "refs/heads/", first: 100, after: $endCursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes { name compare(headRef: $base) { behindBy } }
+            }
+        }
+    }'
+    local listing
+    listing=$(gh_cached "api/repos/$OWNER/$1/branches?merged-into=$2" api graphql --paginate \
+        -f owner="$OWNER" -f name="$1" -f base="$2" -f query="$query" \
+        --jq '.data.repository.refs.nodes[] | "\(.name)\t\(.compare.behindBy // "")"') || {
+        print_error "Failed to fetch the branches of $OWNER/$1: $listing"
         exit 1
     }
-    [[ "$ahead_by" == "0" ]]
+    echo "$listing"
 }
 
 #===============================================================================
