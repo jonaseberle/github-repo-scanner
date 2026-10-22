@@ -93,6 +93,8 @@ Options (values only in the form --option=value):
                       extended regular expression (one row each); without a
                       regex, all directories
   --show-visibility   Optional: add a column with the repo visibility
+  --offline           Optional: use the cached repository list and do not check
+                      for pushes (a cached scan then needs no network)
   --no-cache          Optional: do not read the cache in ./var/cache (new
                       responses are still written to it)
   -v, --verbose       Print each command before it runs (set -x)
@@ -255,7 +257,7 @@ Each GitHub request is cached in `./var/cache` (relative to the current director
 
 ```
 var/cache/
-    repo-list/YOUR_ORG                          gh repo list YOUR_ORG ...
+    api/orgs/YOUR_ORG/repos                     gh api --paginate orgs/YOUR_ORG/repos?sort=pushed ...
     repo-view/OWNER/REPO                        gh repo view OWNER/REPO ...
     api/orgs/NAME                               gh api orgs/NAME
     api/repos/OWNER/REPO/
@@ -268,11 +270,10 @@ var/cache/
 ```
 
 - Files are cached by branch first: all files of a branch are below `ref/<branch>/`. The branch name is not encoded, so `feat/x` is a directory `feat/` with `x/` in it.
-- A file that does not exist is cached too, with the suffix `.404`. Once a request is cached, a scan uses only local data.
+- A file that does not exist is cached too, with the suffix `.404`.
 - Other errors (rate limit, authentication, network) are not cached.
-- Entries do not expire. To fetch some requests again, delete their entries, for example:
-  - `rm var/cache/repo-list/YOUR_ORG` to see new repositories
-  - `rm "var/cache/api/repos/OWNER/REPO/branches?per_page=100"` to see new branches
+- Each scan updates the repository list (a full list once in 24 hours, else only the repositories with new pushes) and deletes the entries of a repository that are older than its last push. With `--offline`, a cached scan uses only local data.
+- To fetch some requests again, delete their entries, for example:
   - `rm -r var/cache/api/repos/OWNER/REPO/ref/feat/x` to scan one branch again
   - `rm -r var/cache/api/repos/OWNER/REPO` to scan one repository again
 - To fetch everything again, use `--no-cache` or delete `var/cache`.
