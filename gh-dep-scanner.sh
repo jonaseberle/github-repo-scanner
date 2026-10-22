@@ -30,6 +30,7 @@ COLOR_PACKAGE=$'\033[4m'
 DELAY=1
 BRANCH=""
 BRANCHES=""
+HIDE_MERGED=0
 ALTERNATIVE_PATHS=""
 REPO_FILTER=""
 SHOW_VISIBILITY=0
@@ -63,6 +64,7 @@ NO_FILE_COUNT=0
 NOT_FOUND_COUNT=0
 BRANCHES_SCANNED=0
 NO_BRANCH_COUNT=0
+MERGED_COUNT=0
 FILTERED_OUT_COUNT=0
 # Stays empty for a single repository.
 ARCHIVED_COUNT=""
@@ -121,6 +123,10 @@ ${BOLD}OPTIONS:${NC}
                         Without a regex: check all branches.
                         Examples: --branches='^feat/|^upgrade/'
                                   --branches=typo3 --branches='upgrade$'
+
+    --hide-merged       Optional, with --branches: hide the branches that are
+                        fully merged into the default branch (one request per
+                        branch). Squash and rebase merges are not detected.
 
     --delay=<seconds>   Optional: delay after each network request (default: 1)
                         Requests served from the cache do not wait.
@@ -453,6 +459,9 @@ parse_args() {
                 ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
+                ;;
+            --hide-merged)
+                HIDE_MERGED=1
                 ;;
             --no-cache)
                 USE_CACHE=0
@@ -908,23 +917,60 @@ is_below_version() {
 }
 
 # Print the branches of a repository that match --branches, one per line.
+# With --hide-merged, a branch that is fully merged into the default branch
+# ($2) is printed as "merged<TAB>name".
 matching_branches() {
     local request="repos/$OWNER/$1/branches?per_page=100"
-    local names name
-    names=$(gh_cached "api/$request" api --paginate "$request" --jq '.[].name') || {
+    local key="api/$request" filter='.[].name'
+    # The commit of each branch is only needed for --hide-merged.
+    if [[ $HIDE_MERGED -eq 1 ]]; then
+        key="api/repos/$OWNER/$1/branches?per_page=100&sha"
+        filter='.[] | "\(.name)\t\(.commit.sha)"'
+    fi
+    local listing name sha
+    listing=$(gh_cached "$key" api --paginate "$request" --jq "$filter") || {
         # Only a 404 means "no branches". Other errors must stop the scan.
-        if [[ "$names" == *"(HTTP 404)"* ]]; then
+        if [[ "$listing" == *"(HTTP 404)"* ]]; then
             return 0
         fi
-        print_error "Failed to fetch the branches of $OWNER/$1: $names"
+        print_error "Failed to fetch the branches of $OWNER/$1: $listing"
         exit 1
     }
-    # Branch names contain no spaces or glob characters.
-    for name in $names; do
-        if [[ "$name" =~ $BRANCHES ]]; then
+
+    local default_sha=""
+    if [[ $HIDE_MERGED -eq 1 ]]; then
+        default_sha=$(echo "$listing" | awk -F '\t' -v name="$2" '$1 == name { print $2 }')
+    fi
+
+    # Branch names contain no spaces, tabs or glob characters.
+    while IFS=$'\t' read -r name sha; do
+        if [[ -z "$name" || ! "$name" =~ $BRANCHES ]]; then
+            continue
+        fi
+        if [[ -n "$default_sha" && "$name" != "$2" ]] && is_merged "$1" "$default_sha" "$sha"; then
+            printf 'merged\t%s\n' "$name"
+        else
             echo "$name"
         fi
-    done
+    done <<< "$listing"
+}
+
+# True if commit $3 is in commit $2 (nothing of $3 is ahead), in repository $1.
+# Compare by commit, not by branch name: the result never changes, so the
+# cache entry stays valid.
+is_merged() {
+    local request="repos/$OWNER/$1/compare/$2...$3"
+    local ahead_by
+    # per_page=1: the response would else list the commits.
+    ahead_by=$(gh_cached "api/$request" api "$request?per_page=1" --jq '.ahead_by') || {
+        # 404: e.g. no common history. Then the branch is not merged.
+        if [[ "$ahead_by" == *"(HTTP 404)"* ]]; then
+            return 1
+        fi
+        print_error "Failed to compare $3 with $2 in $OWNER/$1: $ahead_by"
+        exit 1
+    }
+    [[ "$ahead_by" == "0" ]]
 }
 
 #===============================================================================
@@ -1045,9 +1091,16 @@ scan_repos() {
         local branches target_branch
         if [[ -n "$BRANCHES" ]]; then
             print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS), branches"
-            branches=$(matching_branches "$repo_name")
+            local listing merged
+            listing=$(matching_branches "$repo_name" "$default_branch")
+            merged=$(echo "$listing" | awk -F '\t' '$1 == "merged"' | awk 'END { print NR }')
+            MERGED_COUNT=$((MERGED_COUNT + merged))
+            branches=$(echo "$listing" | awk -F '\t' 'NF == 1')
             if [[ -z "$branches" ]]; then
-                NO_BRANCH_COUNT=$((NO_BRANCH_COUNT + 1))
+                # Only merged branches match: they are counted as merged.
+                if [[ -z "$listing" ]]; then
+                    NO_BRANCH_COUNT=$((NO_BRANCH_COUNT + 1))
+                fi
                 continue
             fi
         else
@@ -1420,6 +1473,8 @@ print_results() {
 
     if [[ ${#RESULT_STATUS[@]} -eq 0 && $SCAN_INTERRUPTED -eq 1 ]]; then
         echo -e "${YELLOW}No results yet.${NC}"
+    elif [[ ${#RESULT_STATUS[@]} -eq 0 && $MERGED_COUNT -gt 0 ]]; then
+        echo -e "${YELLOW}All matching branches are merged (hidden by --hide-merged).${NC}"
     elif [[ ${#RESULT_STATUS[@]} -eq 0 ]]; then
         echo -e "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
     elif [[ $has_results -eq 0 ]]; then
@@ -1441,6 +1496,11 @@ print_results() {
     if [[ -n "$BRANCHES" ]]; then
         echo "  - Branches scanned: $BRANCHES_SCANNED"
         echo "  - Repos without a matching branch: $NO_BRANCH_COUNT"
+        if [[ $HIDE_MERGED -eq 1 ]]; then
+            echo "  - Merged branches: hidden ($MERGED_COUNT)"
+        else
+            echo "  - Merged branches: shown (hide them with --hide-merged)"
+        fi
     fi
     if [[ -n "$ARCHIVED_COUNT" ]]; then
         echo "  - Archived repos: $ARCHIVED_COUNT"
@@ -1531,6 +1591,11 @@ main() {
 
     if [[ -n "$BRANCH" && -n "$BRANCHES" ]]; then
         print_error "Use either --branch or --branches."
+        exit 1
+    fi
+
+    if [[ $HIDE_MERGED -eq 1 && -z "$BRANCHES" ]]; then
+        print_error "--hide-merged needs --branches."
         exit 1
     fi
 
