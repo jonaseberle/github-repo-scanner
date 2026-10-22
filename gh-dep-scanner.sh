@@ -116,11 +116,12 @@ ${BOLD}OPTIONS:${NC}
                         Requests served from the cache do not wait.
                         Increase if hitting rate limits
 
-    --alternativePaths=<path1[,path2,...]>
-                        Optional: directories to search for the dependency
-                        file if it is not in the repository root.
-                        They are tried in the given order.
-                        Example: app,src/web
+    --alternativePaths[=regex]
+                        Optional: also check the dependency files in the
+                        directories that match this extended regular
+                        expression. One row per directory.
+                        Without a regex: all directories.
+                        Example: --alternativePaths='^(webroot|packages/[^/]+)$'
 
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
@@ -169,6 +170,14 @@ print_error() {
         echo "" >&2
     fi
     echo -e "${RED}Error: $1${NC}" >&2
+}
+
+# A warning during the scan, on stderr: the caller may capture stdout.
+print_warning_line() {
+    if [[ $PROGRESS_SHOWN -eq 1 ]]; then
+        echo "" >&2
+    fi
+    echo -e "${YELLOW}Warning: $1${NC}" >&2
 }
 
 print_success() {
@@ -382,6 +391,10 @@ parse_args() {
             --alternativePaths=*)
                 ALTERNATIVE_PATHS="${1#*=}"
                 ;;
+            --alternativePaths)
+                # Without a value, every directory matches.
+                ALTERNATIVE_PATHS="."
+                ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
                 ;;
@@ -395,7 +408,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--package|--below|--repo|--branch|--delay|--alternativePaths)
+            --url|--type|--package|--below|--repo|--branch|--delay)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;
@@ -599,47 +612,45 @@ fetch_repos() {
 # DEPENDENCY FILE FETCHING
 #===============================================================================
 
+# Fetch the dependency file in directory $3 ("." is the root).
+# For --type=node, try package-lock.json first, then yarn.lock.
 fetch_dependency_file() {
     local repo_name="$1"
     local branch="$2"
+    local dir="$3"
     local dep_file dep_files
     dep_files=$(dep_file_names)
 
-    # The leading comma adds the repository root as the first path.
-    local -a paths
-    IFS=',' read -r -a paths <<< ",$ALTERNATIVE_PATHS"
+    local prefix=""
+    if [[ "$dir" != "." ]]; then
+        prefix="$dir/"
+    fi
 
     # Fetch file content from GitHub API.
     # Use the raw media type: the JSON response has no content for files over 1 MB (e.g. composer.lock).
     local ref
     ref=$(url_encode "$branch")
 
-    local path response
-    for path in "${paths[@]}"; do
-        path="${path%/}"
-        for dep_file in $dep_files; do
-            local file_path request
-            file_path=$(url_encode "${path:+$path/}$dep_file")
-            request="repos/$OWNER/$repo_name/contents/$file_path?ref=$ref"
-            # Cache by branch first: all files of a branch are in one directory.
-            local key="api/repos/$OWNER/$repo_name/ref/$branch/${path:+$path/}$dep_file"
-            response=$(gh_cached "$key" api --header "Accept: application/vnd.github.raw+json" "$request") && break 2
-            # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
-            if [[ "$response" != *"(HTTP 404)"* ]]; then
-                print_error "Failed to fetch ${path:+$path/}$dep_file from $OWNER/$repo_name: $response"
-                exit 1
-            fi
-            response=""
-        done
+    local response=""
+    for dep_file in $dep_files; do
+        local file_path request
+        file_path=$(url_encode "$prefix$dep_file")
+        request="repos/$OWNER/$repo_name/contents/$file_path?ref=$ref"
+        # Cache by branch first: all files of a branch are in one directory.
+        local key="api/repos/$OWNER/$repo_name/ref/$branch/$prefix$dep_file"
+        response=$(gh_cached "$key" api --header "Accept: application/vnd.github.raw+json" "$request") && break
+        # Only a 404 means "no file". Other errors (rate limit, auth, network) must stop the scan.
+        if [[ "$response" != *"(HTTP 404)"* ]]; then
+            print_error "Failed to fetch $prefix$dep_file from $OWNER/$repo_name: $response"
+            exit 1
+        fi
+        response=""
     done
 
-    # The first output line is the directory of the file: "." for the root, empty if not found.
     if [[ -z "$response" ]]; then
-        echo ""
         echo "NOT_FOUND"
         return
     fi
-    echo "${path:-.}"
 
     # yarn.lock is not JSON.
     if [[ "$dep_file" != *.json ]] || echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
@@ -647,6 +658,46 @@ fetch_dependency_file() {
     else
         echo "PARSE_ERROR"
     fi
+}
+
+# Print the directories of a branch that contain a dependency file, one per
+# line: the root (".") and those that match --alternativePaths.
+# Uses the file list of the branch: one request, also for many directories.
+matching_dirs() {
+    local repo_name="$1"
+    local branch="$2"
+    local ref listing
+    ref=$(url_encode "$branch")
+    local request="repos/$OWNER/$repo_name/git/trees/$ref?recursive=1"
+    listing=$(gh_cached "api/repos/$OWNER/$repo_name/ref/$branch/tree?recursive=1" api "$request" \
+        --jq '(if .truncated then "TRUNCATED" else empty end), (.tree[] | select(.type == "blob") | .path)') || {
+        # Only a 404 means "no files" (e.g. an empty repository). Other errors must stop the scan.
+        if [[ "$listing" == *"(HTTP 404)"* ]]; then
+            return 0
+        fi
+        print_error "Failed to fetch the file list of $OWNER/$repo_name ($branch): $listing"
+        exit 1
+    }
+    if [[ "$listing" == TRUNCATED* ]]; then
+        print_warning_line "The file list of $OWNER/$repo_name ($branch) is incomplete (too many files). Some directories are not checked."
+    fi
+
+    local dir
+    while IFS= read -r dir; do
+        if [[ "$dir" == "." || "$dir" =~ $ALTERNATIVE_PATHS ]]; then
+            echo "$dir"
+        fi
+    done < <(echo "$listing" | awk -v names="$(dep_file_names)" '
+        BEGIN { n = split(names, list, " "); for (i = 1; i <= n; i++) wanted[list[i]] = 1 }
+        $0 == "TRUNCATED" { next }
+        {
+            file = $0; dir = "."
+            if (index($0, "/") > 0) {
+                sub(/.*\//, "", file)
+                dir = $0; sub(/\/[^\/]*$/, "", dir)
+            }
+            if ((file in wanted) && !(dir in seen)) { seen[dir] = 1; print dir }
+        }')
 }
 
 #===============================================================================
@@ -795,6 +846,51 @@ matching_branches() {
 # MAIN SCANNING LOGIC
 #===============================================================================
 
+# Classify the content of a dependency file and add a result row.
+# Arguments: row URL, visibility, path, content (or NOT_FOUND / PARSE_ERROR)
+record_result() {
+    local content="$4"
+
+    local version_str status
+
+    if [[ "$content" == "NOT_FOUND" ]]; then
+        version_str="N/A"
+        status="no_file"
+        NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
+    elif [[ "$content" == "PARSE_ERROR" ]]; then
+        version_str="Parse error"
+        status="error"
+        NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
+    else
+        # Extract version for the package
+        version_str=$(extract_version "$content" "$PACKAGE" "$TYPE")
+
+        if [[ "$version_str" == "NOT_IN_FILE" ]]; then
+            version_str="Not found"
+            status="not_in_file"
+            NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
+        elif [[ -z "$BELOW_VERSION" ]]; then
+            status="found"
+            FOUND_COUNT=$((FOUND_COUNT + 1))
+        else
+            # Check if below target version
+            if is_below_version "$version_str" "$BELOW_VERSION"; then
+                status="below"
+                BELOW_COUNT=$((BELOW_COUNT + 1))
+            else
+                status="ok"
+            fi
+        fi
+    fi
+
+    RESULT_URLS+=("$1")
+    RESULT_VISIBILITY+=("$2")
+    RESULT_PATHS+=("$3")
+    RESULT_VERSIONS+=("$version_str")
+    RESULT_STATUS+=("$status")
+}
+
+
 scan_repos() {
     echo ""
     echo -e "${BOLD}Scanning $OWNER repositories for $PACKAGE${BELOW_VERSION:+ < $BELOW_VERSION}...${NC}"
@@ -843,55 +939,33 @@ scan_repos() {
 
             print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name${BRANCHES:+ ($target_branch)}"
 
-            # Fetch dependency file
-            local fetched content found_path
-            fetched=$(fetch_dependency_file "$repo_name" "$target_branch")
-            found_path="${fetched%%$'\n'*}"
-            content="${fetched#*$'\n'}"
-
-            local version_str status
-
-            if [[ "$content" == "NOT_FOUND" ]]; then
-                version_str="N/A"
-                status="no_file"
-                NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
-            elif [[ "$content" == "PARSE_ERROR" ]]; then
-                version_str="Parse error"
-                status="error"
-                NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
-            else
-                # Extract version for the package
-                version_str=$(extract_version "$content" "$PACKAGE" "$TYPE")
-
-                if [[ "$version_str" == "NOT_IN_FILE" ]]; then
-                    version_str="Not found"
-                    status="not_in_file"
-                    NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
-                elif [[ -z "$BELOW_VERSION" ]]; then
-                    status="found"
-                    FOUND_COUNT=$((FOUND_COUNT + 1))
-                else
-                    # Check if below target version
-                    if is_below_version "$version_str" "$BELOW_VERSION"; then
-                        status="below"
-                        BELOW_COUNT=$((BELOW_COUNT + 1))
-                    else
-                        status="ok"
-                    fi
-                fi
-            fi
-
-            # Store results
             # With --branches, a row is a branch: link to it.
             local row_url="$repo_url"
             if [[ -n "$BRANCHES" ]]; then
                 row_url="$repo_url/tree/$(url_encode "$target_branch")"
             fi
-            RESULT_URLS+=("$row_url")
-            RESULT_VERSIONS+=("$version_str")
-            RESULT_VISIBILITY+=("$visibility")
-            RESULT_PATHS+=("$found_path")
-            RESULT_STATUS+=("$status")
+
+            # One row per directory with a dependency file.
+            local dirs dir
+            if [[ -n "$ALTERNATIVE_PATHS" ]]; then
+                dirs=$(matching_dirs "$repo_name" "$target_branch")
+                if [[ -z "$dirs" ]]; then
+                    record_result "$row_url" "$visibility" "" "NOT_FOUND"
+                    continue
+                fi
+            else
+                dirs="."
+            fi
+            while IFS= read -r dir; do
+                local content
+                content=$(fetch_dependency_file "$repo_name" "$target_branch" "$dir")
+                # Without --alternativePaths, there is no PATH column.
+                if [[ "$content" == "NOT_FOUND" ]]; then
+                    record_result "$row_url" "$visibility" "" "$content"
+                else
+                    record_result "$row_url" "$visibility" "$dir" "$content"
+                fi
+            done <<< "$dirs"
         done
 
     done < <(echo "$REPOS_DATA" | jq -c '.[]')
@@ -1082,9 +1156,9 @@ print_results() {
 
     local has_results=0
 
-    # Sort the rows by URL. URLs contain no spaces.
+    # Sort the rows by URL, then path. The index is the last field.
     local sorted_rows
-    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} $i"; done | sort --ignore-case | awk '{ print $2 }')
+    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_PATHS[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
 
     # Group the rows: version below, version above (or found), package not found, no file.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
@@ -1247,6 +1321,7 @@ main() {
 
     check_regex --branches "$BRANCHES"
     check_regex --repo "$REPO_FILTER"
+    check_regex --alternativePaths "$ALTERNATIVE_PATHS"
 
     if [[ $USE_CACHE -eq 1 ]]; then
         print_info "Using the cache in $CACHE_DIR. Delete entries there or use --no-cache to fetch again."
