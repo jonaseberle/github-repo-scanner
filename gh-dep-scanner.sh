@@ -1027,7 +1027,7 @@ scan_repos() {
         # Determine which branches to use
         local branches target_branch
         if [[ -n "$BRANCHES" ]]; then
-            print_progress "" "Scanning repo $i/$TOTAL_REPOS: " "$CYAN" "$repo_name" "" " (branches)"
+            print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS), branches"
             branches=$(matching_branches "$repo_name")
             if [[ -z "$branches" ]]; then
                 NO_BRANCH_COUNT=$((NO_BRANCH_COUNT + 1))
@@ -1046,10 +1046,10 @@ scan_repos() {
             branch_number=$((branch_number + 1))
 
             if [[ -n "$BRANCHES" ]]; then
-                print_progress "" "Scanning repo $i/$TOTAL_REPOS: " "$CYAN" "$repo_name" "" ", branch " \
+                print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS), branch " \
                     "$COLOR_BRANCH" "$target_branch" "" " ($branch_number/$branch_count)"
             else
-                print_progress "" "Scanning repo $i/$TOTAL_REPOS: " "$CYAN" "$repo_name"
+                print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS)"
             fi
 
             # One row per directory with a dependency file.
