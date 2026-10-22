@@ -825,14 +825,9 @@ fetch_repos() {
             print_error "Failed to fetch repository: $OWNER/$REPO"
             exit 1
         }
-    elif [[ "$OWNER_TYPE" == "org" ]]; then
-        repos_json=$(refresh_unless_offline; gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef,pushedAt) || {
-            print_error "Failed to fetch repositories for organization: $OWNER"
-            exit 1
-        }
     else
-        repos_json=$(refresh_unless_offline; gh_cached "repo-list/$OWNER" repo list "$OWNER" --limit 1000 --json name,url,isPrivate,isArchived,defaultBranchRef,pushedAt) || {
-            print_error "Failed to fetch repositories for user: $OWNER"
+        repos_json=$(fetch_repo_list) || {
+            print_error "Failed to fetch the repositories of $OWNER_TYPE $OWNER"
             exit 1
         }
     fi
@@ -874,6 +869,72 @@ fetch_repos() {
 
     log INFO "Repositories of $OWNER_TYPE $OWNER: $TOTAL_REPOS to scan, ${ARCHIVED_COUNT:-0} archived, $FILTERED_OUT_COUNT not matching --repo"
     print_success "Found $TOTAL_REPOS repositories."
+}
+
+# The REST fields of a repository, in the shape of "gh repo list --json".
+REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at}'
+# A full repository list at most this old (seconds); in between, only the
+# repositories with new pushes are fetched.
+REPOS_FULL_MAX_AGE=86400
+
+# The REST endpoint for the repositories of OWNER, newest push first.
+# REST is about twice as fast as "gh repo list" (GraphQL).
+repos_endpoint() {
+    if [[ "$OWNER_TYPE" == "org" ]]; then
+        echo "orgs/$OWNER/repos?type=all&per_page=100&sort=pushed&direction=desc"
+        return
+    fi
+    # Only the list of the logged-in user (user/repos) has the private repositories.
+    local login
+    # Not the key "api/user": it would be a file where "api/user/repos" needs a directory.
+    login=$(gh_cached "api/user?login" api user --jq '.login') || login=""
+    if [[ "$login" == "$OWNER" ]]; then
+        echo "user/repos?affiliation=owner&per_page=100&sort=pushed&direction=desc"
+    else
+        echo "users/$OWNER/repos?type=owner&per_page=100&sort=pushed&direction=desc"
+    fi
+}
+
+# Print the repositories of OWNER as a JSON array.
+# A full list (all pages) is fetched if the cached one is older than
+# REPOS_FULL_MAX_AGE or with --no-cache. In between, only the pages up to the
+# first repository with an unchanged push time are fetched, usually one.
+# Archiving, renaming and deleting do not change the push time: the next
+# full list shows them. --offline uses the cached list.
+fetch_repo_list() {
+    local endpoint key file full listing
+    endpoint=$(repos_endpoint)
+    key="api/${endpoint%%\?*}"
+    file="$CACHE_DIR/$key"
+    full="$file.full"
+
+    if [[ $OFFLINE -eq 0 && ( $USE_CACHE -eq 0 || ! -f "$file" || ! -f "$full" || $(($(date +%s) - $(file_mtime "$full"))) -ge $REPOS_FULL_MAX_AGE ) ]]; then
+        log INFO "Fetching the full repository list: $endpoint"
+        listing=$(USE_CACHE=0; gh_cached "$key" api --paginate "$endpoint" --jq ".[] | $REPO_FIELDS") || return 1
+        write_cache_entry "$full" ""
+    elif [[ $OFFLINE -eq 0 ]]; then
+        local page=1 lines added="" unchanged
+        while true; do
+            lines=$(USE_CACHE=0; gh_cached "$key.page" api "$endpoint&page=$page" --jq ".[] | $REPO_FIELDS") || return 1
+            added+="$lines"$'\n'
+            # The list is sorted by push time: after an unchanged repository, all are unchanged.
+            # --slurpfile, not --argjson: a long list must not be a command line argument.
+            unchanged=$(echo "$lines" | jq --slurp --slurpfile cached "$file" \
+                'any(.[]; . as $r | $cached | any(.name == $r.name and .pushedAt == $r.pushedAt))')
+            if [[ -z "$lines" || "$unchanged" == "true" || $(echo "$lines" | awk 'END { print NR }') -lt 100 ]]; then
+                break
+            fi
+            page=$((page + 1))
+        done
+        log INFO "Repository list: $page page(s) with new pushes merged into the cached list"
+        # The new entries first: for a name, the first entry stays.
+        listing=$( (printf '%s' "$added"; cat "$file") | jq --slurp --compact-output \
+            'reduce .[] as $r ({}; if has($r.name) then . else .[$r.name] = $r end) | .[]')
+        write_cache_entry "$file" "$listing"
+    else
+        listing=$(gh_cached "$key" api --paginate "$endpoint" --jq ".[] | $REPO_FIELDS") || return 1
+    fi
+    echo "$listing" | jq --slurp '.'
 }
 
 # The repository list must be fresh: its push times tell which cache
