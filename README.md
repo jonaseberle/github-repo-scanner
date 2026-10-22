@@ -80,9 +80,10 @@ Options (values only in the form --option=value):
                       regex, all branches
   --delay=<seconds>   Optional: delay after each network request (default: 1);
                       requests served from the cache do not wait
-  --alternativePaths=<path1[,path2,...]>
-                      Optional: directories to search for the dependency file
-                      if it is not in the repository root, in this order
+  --alternativePaths[=regex]
+                      Optional: also check the directories that match this
+                      extended regular expression (one row each); without a
+                      regex, all directories
   --show-visibility   Optional: add a column with the repo visibility
   --no-cache          Optional: do not read the cache in ./var/cache (new
                       responses are still written to it)
@@ -197,9 +198,7 @@ Options (values only in the form --option=value):
   --below=4
 ```
 
-### Also search subdirectories for the dependency file
-
-The repository root is searched first, then `app`, then `src/web`.
+### Also check subdirectories
 
 ```bash
 ./gh-dep-scanner.sh \
@@ -207,7 +206,7 @@ The repository root is searched first, then `app`, then `src/web`.
   --type=composer \
   --package=typo3/cms-core \
   --below=12 \
-  --alternativePaths=app,src/web
+  --alternativePaths='^(app|packages/[^/]+)$'
 ```
 
 ### Check the constraint in package.json instead of the installed version
@@ -255,7 +254,8 @@ var/cache/
         branches?per_page=100                   gh api --paginate repos/OWNER/REPO/branches?per_page=100
         ref/main/composer.lock                  gh api repos/OWNER/REPO/contents/composer.lock?ref=main
         ref/feat/x/composer.lock                gh api repos/OWNER/REPO/contents/composer.lock?ref=feat/x
-        ref/feat/x/webroot/composer.lock.404    gh api repos/OWNER/REPO/contents/webroot/composer.lock?ref=feat/x
+        ref/feat/x/tree?recursive=1             gh api repos/OWNER/REPO/git/trees/feat/x?recursive=1 (for --alternativePaths)
+        ref/feat/x/webroot/composer.lock        gh api repos/OWNER/REPO/contents/webroot/composer.lock?ref=feat/x
 ```
 
 - Files are cached by branch first: all files of a branch are below `ref/<branch>/`. The branch name is not encoded, so `feat/x` is a directory `feat/` with `x/` in it.
@@ -338,7 +338,6 @@ The script extracts the major version from common constraint formats:
 
 ## Limitations
 
-- Only scans the root dependency file, or the first one found in `--alternativePaths` (not all monorepo subdirectories)
 - Compares major versions only (not minor/patch)
 - Maximum ~1000 repos per scan (GitHub API limit)
 - Does not read `pnpm-lock.yaml`
