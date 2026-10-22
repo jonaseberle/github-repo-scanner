@@ -55,7 +55,7 @@ Simply run the script without arguments:
 You'll be prompted for:
 1. GitHub URL (org, personal or a single repository)
 2. Dependency type (composer/node/composerJson/nodeJson)
-3. Package name
+3. Packages (regular expression; Enter for all)
 4. Minimum version to check against (optional)
 5. Branch (optional)
 
@@ -69,7 +69,9 @@ Options (values only in the form --option=value):
   --type=<type>       Dependency type: "composer" (composer.lock), "composerJson"
                       (composer.json), "node" (package-lock.json or yarn.lock)
                       or "nodeJson" (package.json)
-  --package=<name>    Package name to search for
+  --packages[=regex]  Packages whose name matches this extended regular
+                      expression, e.g. '^livewire/livewire$'; without a regex,
+                      all packages
   --below=<version>   Optional: find packages below this version (e.g. 4 or 2.1.3)
                       (default: find all repos that have the package)
   --repo=<regex>      Optional: only repos whose name matches this extended
@@ -99,7 +101,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
-  --package=livewire/livewire \
+  --packages='^livewire/livewire$' \
   --below=4
 ```
 
@@ -109,7 +111,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/USERNAME" \
   --type=node \
-  --package=react \
+  --packages='^react$' \
   --below=18
 ```
 
@@ -119,7 +121,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/MyOrg/repositories" \
   --type=composer \
-  --package=laravel/framework \
+  --packages='^laravel/framework$' \
   --below=10 \
   --branch=develop
 ```
@@ -130,7 +132,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
-  --package=livewire/livewire
+  --packages='^livewire/livewire$'
 ```
 
 ### Increase delay for large organizations (avoid rate limits)
@@ -139,7 +141,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/LargeOrg/repositories" \
   --type=composer \
-  --package=symfony/console \
+  --packages='^symfony/console$' \
   --below=6 \
   --delay=2
 ```
@@ -153,7 +155,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
-  --package=typo3/cms-core \
+  --packages='^typo3/cms-core$' \
   --below=13 \
   --branches='^feat/|^upgrade/'
 
@@ -173,7 +175,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
-  --package=livewire/livewire \
+  --packages='^livewire/livewire$' \
   --below=4 \
   --verbose
 ```
@@ -184,7 +186,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/OWNER/REPO" \
   --type=composer \
-  --package=laravel/framework \
+  --packages='^laravel/framework$' \
   --below=10
 ```
 
@@ -194,7 +196,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composerJson \
-  --package=livewire/livewire \
+  --packages='^livewire/livewire$' \
   --below=4
 ```
 
@@ -204,7 +206,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
-  --package=typo3/cms-core \
+  --packages='^typo3/cms-core$' \
   --below=12 \
   --alternativePaths='^(app|packages/[^/]+)$'
 ```
@@ -215,7 +217,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/USERNAME" \
   --type=nodeJson \
-  --package=react \
+  --packages='^react$' \
   --below=18
 ```
 
@@ -225,7 +227,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
-  --package=livewire/livewire \
+  --packages='^livewire/livewire$' \
   --show-visibility
 ```
 
@@ -237,7 +239,7 @@ Options (values only in the form --option=value):
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
-  --package=livewire/livewire \
+  --packages='^livewire/livewire$' \
   --no-cache
 ```
 
@@ -271,29 +273,29 @@ var/cache/
 ## Sample Output
 
 ```
-Scanning YOUR_ORG repositories for livewire/livewire < 4...
+Scanning YOUR_ORG repositories for packages matching ^livewire/livewire$ < 4...
 Branch: default
 
-REPO URL                                                VERSION
---------                                                -------
+REPO URL                                   PACKAGE           VERSION
+--------                                   -------           -------
 
 VERSION BELOW
-https://github.com/YOUR_ORG/marketing-site              ~3.1.0
-https://github.com/YOUR_ORG/project-alpha               ^3.2
+https://github.com/YOUR_ORG/marketing-site livewire/livewire ~3.1.0
+https://github.com/YOUR_ORG/project-alpha  livewire/livewire ^3.2
 
 VERSION ABOVE
-https://github.com/YOUR_ORG/shop-backend                ^4.0
+https://github.com/YOUR_ORG/shop-backend   livewire/livewire ^4.0
 
 N/A
-https://github.com/YOUR_ORG/client-portal               N/A
+https://github.com/YOUR_ORG/client-portal                    N/A
 
 ================================================================================
 Summary:
   - Total repos scanned: 25
   - Archived repos: 3
-  - Repos with livewire/livewire below v4: 2
+  - Packages below 4: 2
   - Repos without composer.lock: 5
-  - Repos without livewire/livewire in dependencies: 10
+  - Files without packages matching ^livewire/livewire$: 10
   - Requests served from the cache: 24 of 26 (oldest entry: 2d 3h old)
 ```
 
