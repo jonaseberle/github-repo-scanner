@@ -28,6 +28,8 @@ ALTERNATIVE_PATHS=""
 SHOW_VISIBILITY=0
 CACHE_DIR="./var/cache"
 USE_CACHE=1
+# Terminal width, for the progress line and the result table.
+TERM_COLUMNS=$(tput cols 2>/dev/null || echo 80)
 # One line per request: "cache <mtime>" or "network".
 # A file, because gh_cached runs in subshells.
 REQUEST_LOG=""
@@ -170,8 +172,14 @@ print_warning() {
     echo -e "${YELLOW}$1${NC}"
 }
 
+# Cut the line to the terminal width: a wrapped line is not cleared by "\r".
+# Keep room for the dots of the network requests.
 print_progress() {
-    echo -ne "\r\033[K${CYAN}$1${NC}"
+    local text="$1" max=$((TERM_COLUMNS - 12))
+    if [[ ${#text} -gt $max ]]; then
+        text="${text:0:$((max - 3))}..."
+    fi
+    echo -ne "\r\033[K${CYAN}$text ${NC}"
 }
 
 # Space-separated, in the order they are tried.
@@ -200,6 +208,11 @@ gh_cached() {
         echo "cache $(file_mtime "$file.404")" >> "$REQUEST_LOG"
         cat "$file.404"
         return 1
+    fi
+
+    # One dot per network request shows progress during slow requests.
+    if [[ -t 2 ]]; then
+        printf '.' >&2
     fi
 
     local output status=0
@@ -777,6 +790,7 @@ scan_repos() {
         # Determine which branches to use
         local branches target_branch
         if [[ -n "$BRANCHES" ]]; then
+            print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name (branches)"
             branches=$(matching_branches "$repo_name")
             if [[ -z "$branches" ]]; then
                 NO_BRANCH_COUNT=$((NO_BRANCH_COUNT + 1))
@@ -789,7 +803,7 @@ scan_repos() {
         for target_branch in $branches; do
             BRANCHES_SCANNED=$((BRANCHES_SCANNED + 1))
 
-            print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name${BRANCHES:+ ($target_branch)}..."
+            print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name${BRANCHES:+ ($target_branch)}"
 
             # Fetch dependency file
             local content
