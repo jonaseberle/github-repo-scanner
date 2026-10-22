@@ -70,7 +70,7 @@ Options (values only in the form --option=value):
                       (composer.json), "node" (package-lock.json or yarn.lock)
                       or "nodeJson" (package.json)
   --package=<name>    Package name to search for
-  --below=<version>   Optional: find packages below this major version
+  --below=<version>   Optional: find packages below this version (e.g. 4 or 2.1.3)
                       (default: find all repos that have the package)
   --repo=<regex>      Optional: only repos whose name matches this extended
                       regular expression, e.g. --repo='^typo3-'
@@ -322,23 +322,22 @@ https://github.com/OWNER/REPO
 
 ## Version Comparison Logic
 
-The script extracts the major version from common constraint formats:
+The script takes the first version of a constraint:
 
-| Constraint | Extracted Major | Below v4? |
-|------------|-----------------|-----------|
-| `^3.2` | 3 | Yes |
-| `~3.1.0` | 3 | Yes |
-| `>=3.0` | 3 | Yes |
-| `3.*` | 3 | Yes |
-| `^4.0` | 4 | No |
-| `4.1.2` | 4 | No |
-| `v3.5.2` (from `composer.lock`) | 3 | Yes |
-| `*` | 0 | Yes (conservative) |
-| `dev-main` | 0 | Yes (conservative) |
+| Constraint | Extracted version | Below 4? |
+|------------|-------------------|----------|
+| `^3.2` | 3.2.0 | Yes |
+| `~3.1.0` | 3.1.0 | Yes |
+| `>=3.0` | 3.0.0 | Yes |
+| `3.*` | 3.0.0 | Yes |
+| `^4.0` | 4.0.0 | No |
+| `4.1.2` | 4.1.2 | No |
+| `v3.5.2` (from `composer.lock`) | 3.5.2 | Yes |
+| `*` | 0.0.0 | Yes (conservative) |
+| `dev-main` | 0.0.0 | Yes (conservative) |
 
 ## Limitations
 
-- Compares major versions only (not minor/patch)
 - Maximum ~1000 repos per scan (GitHub API limit)
 - Does not read `pnpm-lock.yaml`
 - In `yarn.lock`, uses the first entry for the package if there are several versions
