@@ -72,8 +72,9 @@ Options (values only in the form --option=value):
   --packages[=regex]  Packages whose name matches this extended regular
                       expression, e.g. '^livewire/livewire$'; without a regex,
                       all packages
-  --below=<version>   Optional: find packages below this version (e.g. 4 or 2.1.3)
-                      (default: find all repos that have the package)
+  --affected=<ranges> Optional: affected version ranges, as in security
+                      advisories, e.g. '>=13.0.0,<13.3.5|<6.4.5' (default:
+                      show all found packages)
   --repo=<regex>      Optional: only repos whose name matches this extended
                       regular expression, e.g. --repo='^typo3-'
   --branch=<name>     Optional: specific branch to check (default: repo's default)
@@ -98,34 +99,34 @@ Options (values only in the form --option=value):
 
 ## Examples
 
-### Find repos with Livewire < v4 in an organization
+### Find repos with Livewire < 4 in an organization
 
 ```bash
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
   --packages='^livewire/livewire$' \
-  --below=4
+  --affected='<4'
 ```
 
-### Find repos with React < v18 for a personal account
+### Find repos with React < 18 for a personal account
 
 ```bash
 ./gh-dep-scanner.sh \
   --url="https://github.com/USERNAME" \
   --type=node \
   --packages='^react$' \
-  --below=18
+  --affected='<18'
 ```
 
-### Find repos with Laravel < v10 on develop branch
+### Find repos with Laravel < 10 on develop branch
 
 ```bash
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/MyOrg/repositories" \
   --type=composer \
   --packages='^laravel/framework$' \
-  --below=10 \
+  --affected='<10' \
   --branch=develop
 ```
 
@@ -145,7 +146,7 @@ Options (values only in the form --option=value):
   --url="https://github.com/orgs/LargeOrg/repositories" \
   --type=composer \
   --packages='^symfony/console$' \
-  --below=6 \
+  --affected='<6' \
   --delay=2
 ```
 
@@ -159,7 +160,7 @@ Options (values only in the form --option=value):
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
   --packages='^typo3/cms-core$' \
-  --below=13 \
+  --affected='<13' \
   --branches='^feat/|^upgrade/'
 
 # Branches that contain "typo3", or end with "upgrade"
@@ -179,7 +180,7 @@ Options (values only in the form --option=value):
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
   --packages='^livewire/livewire$' \
-  --below=4 \
+  --affected='<4' \
   --verbose
 ```
 
@@ -190,7 +191,7 @@ Options (values only in the form --option=value):
   --url="https://github.com/OWNER/REPO" \
   --type=composer \
   --packages='^laravel/framework$' \
-  --below=10
+  --affected='<10'
 ```
 
 ### Check the constraint in composer.json instead of the installed version
@@ -200,7 +201,7 @@ Options (values only in the form --option=value):
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composerJson \
   --packages='^livewire/livewire$' \
-  --below=4
+  --affected='<4'
 ```
 
 ### Also check subdirectories
@@ -210,7 +211,7 @@ Options (values only in the form --option=value):
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --type=composer \
   --packages='^typo3/cms-core$' \
-  --below=12 \
+  --affected='<12' \
   --alternativePaths='^(app|packages/[^/]+)$'
 ```
 
@@ -221,7 +222,7 @@ Options (values only in the form --option=value):
   --url="https://github.com/USERNAME" \
   --type=nodeJson \
   --packages='^react$' \
-  --below=18
+  --affected='<18'
 ```
 
 ### Show the visibility of each repository
@@ -277,17 +278,17 @@ var/cache/
 ## Sample Output
 
 ```
-Scanning YOUR_ORG repositories for packages matching ^livewire/livewire$ < 4...
+Scanning YOUR_ORG repositories for packages matching ^livewire/livewire$, affected: <4...
 Branch: default
 
 REPO URL                                   PACKAGE           VERSION
 --------                                   -------           -------
 
-VERSION BELOW
+AFFECTED
 https://github.com/YOUR_ORG/marketing-site livewire/livewire ~3.1.0
 https://github.com/YOUR_ORG/project-alpha  livewire/livewire ^3.2
 
-VERSION ABOVE
+NOT AFFECTED
 https://github.com/YOUR_ORG/shop-backend   livewire/livewire ^4.0
 
 N/A
@@ -297,7 +298,7 @@ https://github.com/YOUR_ORG/client-portal                    N/A
 Summary:
   - Total repos scanned: 25
   - Archived repos: 3
-  - Packages below 4: 2
+  - Packages affected: 2
   - Repos without composer.lock: 5
   - Files without packages matching ^livewire/livewire$: 10
   - Requests served from the cache: 24 of 26 (oldest entry: 2d 3h old)
@@ -305,14 +306,14 @@ Summary:
 
 ### Output Legend
 
-Rows are grouped: VERSION BELOW (package below the target version), VERSION ABOVE (package at or above the target version), VERSION FOUND (package found, without `--below`), PACKAGE NOT FOUND (package not in the dependency file) and N/A (no dependency file). Inside each group, rows are sorted by URL.
+Rows are grouped: AFFECTED (version in an `--affected` range), NOT AFFECTED, VERSION FOUND (without `--affected`), PACKAGE NOT FOUND (package not in the dependency file) and N/A (no dependency file). Inside each group, rows are sorted by URL.
 
 | Color | Meaning |
 |-------|---------|
-| Red | Package found below target version |
+| Red | Package version is affected |
 | Yellow | No dependency file (composer.lock/composer.json/package-lock.json/yarn.lock/package.json) |
 | Cyan | Dependency file exists but package not found |
-| Green | Package found at or above target version (or found at all, without `--below`) |
+| Green | Package version is not affected (or found, without `--affected`) |
 
 ## Supported URL Formats
 
@@ -328,9 +329,11 @@ https://github.com/OWNER/REPO
 
 ## Version Comparison Logic
 
-The script takes the first version of a constraint:
+`--affected` takes ranges like the security advisories on packagist.org: `|` separates alternatives, `,` joins conditions that must all hold, e.g. `>=13.0.0,<13.3.5|<6.4.5`. Operators: `>=`, `>`, `<=`, `<`, `=`, `!=`.
 
-| Constraint | Extracted version | Below 4? |
+For a constraint (`--type=composerJson`, `--type=nodeJson`), the script takes its first version:
+
+| Constraint | Extracted version | Affected by `<4`? |
 |------------|-------------------|----------|
 | `^3.2` | 3.2.0 | Yes |
 | `~3.1.0` | 3.1.0 | Yes |
