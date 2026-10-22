@@ -931,6 +931,20 @@ matching_branches() {
 # MAIN SCANNING LOGIC
 #===============================================================================
 
+# The number of the repository that is scanned now, for an interrupted scan.
+SCAN_POSITION=0
+SCAN_INTERRUPTED=0
+
+# Ctrl-C during the scan shows the results so far. A second Ctrl-C stops at once.
+on_scan_interrupt() {
+    trap - INT
+    SCAN_INTERRUPTED=1
+    echo -ne "\r\033[K"
+    PROGRESS_SHOWN=0
+    print_results
+    exit 130
+}
+
 # Classify a package version and add a result row.
 # Arguments: URL, branch, path, visibility, package, and the version or
 # NOT_FOUND (no file) / PARSE_ERROR / NOT_IN_FILE (no matching package).
@@ -1006,9 +1020,12 @@ scan_repos() {
     fi
     echo ""
 
+    trap on_scan_interrupt INT
+
     local i=0
     while IFS= read -r repo_line; do
         i=$((i + 1))
+        SCAN_POSITION=$i
 
         local repo_name repo_url is_private default_branch
         repo_name=$(echo "$repo_line" | jq -r '.name')
@@ -1076,6 +1093,7 @@ scan_repos() {
         done
 
     done < <(echo "$REPOS_DATA" | jq -c '.[]')
+    trap - INT
 
     # Clear progress line
     echo -ne "\r\033[K"
@@ -1165,7 +1183,7 @@ PACKAGE_COLUMN_WIDTH=7
 # its own line, because a URL never wraps).
 set_column_widths() {
     local i url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
-    for i in "${!RESULT_URLS[@]}"; do
+    for i in "${!RESULT_STATUS[@]}"; do
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
         fi
@@ -1345,7 +1363,8 @@ print_results() {
 
     # Sort the rows by URL, branch, path and package. The index is the last field.
     local sorted_rows
-    sorted_rows=$(for i in "${!RESULT_URLS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
+    # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
+    sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
 
     # Group the rows: version below, version above (or found), package not found, no file.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
@@ -1399,7 +1418,9 @@ print_results() {
         fi
     done
 
-    if [[ ${#RESULT_URLS[@]} -eq 0 ]]; then
+    if [[ ${#RESULT_STATUS[@]} -eq 0 && $SCAN_INTERRUPTED -eq 1 ]]; then
+        echo -e "${YELLOW}No results yet.${NC}"
+    elif [[ ${#RESULT_STATUS[@]} -eq 0 ]]; then
         echo -e "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
     elif [[ $has_results -eq 0 ]]; then
         echo -e "${GREEN}All found packages are at version ${COLOR_VERSION}$BELOW_VERSION${NC}${GREEN} or higher.${NC}"
@@ -1409,7 +1430,11 @@ print_results() {
     echo ""
     echo "================================================================================"
     echo -e "${BOLD}Summary:${NC}"
-    echo "  - Total repos scanned: $TOTAL_REPOS"
+    if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
+        echo "  - Total repos scanned: $((SCAN_POSITION - 1)) of $TOTAL_REPOS (stopped in repo $SCAN_POSITION)"
+    else
+        echo "  - Total repos scanned: $TOTAL_REPOS"
+    fi
     if [[ -n "$REPO_FILTER" ]]; then
         echo "  - Repos not matching --repo: $FILTERED_OUT_COUNT"
     fi
@@ -1444,6 +1469,10 @@ print_results() {
         echo "  - Requests served from the cache: $cache_hits of $requests (oldest entry: $(format_age $(($(date +%s) - oldest))) old)"
     else
         echo "  - Requests served from the cache: 0 of $requests"
+    fi
+    if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
+        echo ""
+        echo -e "${RED}${BOLD}Scanning NOT complete.${NC}"
     fi
     echo ""
 }
