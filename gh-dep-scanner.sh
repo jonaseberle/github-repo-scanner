@@ -358,6 +358,26 @@ gh_cached() {
         fi
     fi
 
+    local output status=0
+    output=$(gh_request "$@") || status=$?
+
+    if [[ $status -eq 0 ]]; then
+        write_cache_entry "$file" "$output"
+        rm -f "$file.404"
+        log DEBUG "cache write: $key"
+    elif [[ "$(http_status "$output")" == "404" ]]; then
+        write_cache_entry "$file.404" "$output"
+        rm -f "$file"
+        log DEBUG "cache write (404): $key"
+    fi
+    release_lock "$lock"
+    printf '%s\n' "$output"
+    return $status
+}
+
+# Run "gh <arguments>" and print the output. Pace the requests, wait at the
+# rate limit and retry network errors.
+gh_request() {
     # Retry a network error (no HTTP status, e.g. "connection reset") or a 5xx
     # up to 3 times. Other HTTP errors (404, authentication) do not change on
     # retry. At the rate limit, wait and send the request again.
@@ -413,16 +433,6 @@ gh_cached() {
         sleep $((attempt * 2))
     done
 
-    if [[ $status -eq 0 ]]; then
-        write_cache_entry "$file" "$output"
-        rm -f "$file.404"
-        log DEBUG "cache write: $key"
-    elif [[ "$(http_status "$output")" == "404" ]]; then
-        write_cache_entry "$file.404" "$output"
-        rm -f "$file"
-        log DEBUG "cache write (404): $key"
-    fi
-    release_lock "$lock"
     printf '%s\n' "$output"
     return $status
 }
@@ -1542,6 +1552,162 @@ branch_commit() {
     echo "$commit"
 }
 
+# Repositories per GraphQL request. Lock files are large: 20 give about 4 MB.
+PREFETCH_BATCH=20
+
+# Fetch the branch commit and the dependency files in the root for many
+# repositories with one GraphQL request each. Write them to the cache entries
+# of branch_commit and fetch_dependency_file: the scan then reads the cache.
+# Only for repositories without a cached entry. A failed request writes
+# nothing: then the scan fetches the files one by one.
+prefetch_dependency_files() {
+    if [[ -n "$BRANCHES" || $USE_CACHE -eq 0 || $OFFLINE -eq 1 ]]; then
+        return 0
+    fi
+
+    local files pending="" count=0 name branch commit file missing dir
+    files=$(dep_file_names)
+    while IFS=$'\t' read -r name branch; do
+        if [[ -z "$branch" ]]; then
+            continue
+        fi
+        dir="$CACHE_DIR/api/repos/$OWNER/$name"
+        if [[ -f "$dir/branches/$branch.404" ]]; then
+            continue
+        fi
+        commit=""
+        if [[ -f "$dir/branches/$branch" ]]; then
+            commit=$(cat "$dir/branches/$branch")
+            missing=0
+            for file in $files; do
+                if [[ ! -f "$dir/commit/$commit/$file" && ! -f "$dir/commit/$commit/$file.404" ]]; then
+                    missing=1
+                fi
+            done
+            if [[ $missing -eq 0 ]]; then
+                continue
+            fi
+        fi
+        pending+="$name"$'\t'"$branch"$'\t'"$commit"$'\n'
+        count=$((count + 1))
+    done < <(echo "$REPOS_DATA" | jq -r --arg branch "$BRANCH" '.[] | "\(.name)\t\(if $branch != "" then $branch else .defaultBranchRef.name // "main" end)"')
+
+    if [[ $count -eq 0 ]]; then
+        return 0
+    fi
+    log INFO "Prefetch: $count repositories, $PREFETCH_BATCH per GraphQL request"
+
+    local batch done_count=0 response
+    response=$(mktemp)
+    while [[ -n "$pending" ]]; do
+        batch=$(printf '%s' "$pending" | awk -v n="$PREFETCH_BATCH" 'NR <= n')
+        pending=$(printf '%s' "$pending" | awk -v n="$PREFETCH_BATCH" 'NR > n')
+        print_progress "" "Fetching the dependency files: " "$CYAN" "$done_count/$count" "" " repositories"
+        done_count=$((done_count + $(printf '%s\n' "$batch" | awk 'END { print NR }')))
+        prefetch_batch "$batch" "$files" "$response"
+    done
+    rm -f "$response"
+    echo -ne "\r\033[K"
+    PROGRESS_SHOWN=0
+}
+
+# Fetch the lines "name<TAB>branch<TAB>commit or empty" of $1 with one
+# GraphQL request. $2: the dependency file names. $3: a temporary file.
+prefetch_batch() {
+    local query
+    # The commit and the files come from one commit object: a push during
+    # the request cannot mix them up.
+    query=$(jq --null-input --raw-output --arg batch "$1" --arg files "$2" --arg owner "$OWNER" '
+        ($files | split(" ")) as $files
+        | [$batch | split("\n")[] | select(length > 0) | split("\t")] as $repos
+        | "query { "
+          + ([range($repos | length) as $i | $repos[$i] as $r
+              | "r\($i): repository(owner: \($owner | @json), name: \($r[0] | @json)) { "
+              + (if ($r[2] // "") != ""
+                 then "object(oid: \($r[2] | @json)) { ...Files } }"
+                 else "ref(qualifiedName: \("refs/heads/" + $r[1] | @json)) { target { ...Files } } }"
+                 end)] | join(" "))
+          + " } fragment Files on Commit { oid "
+          + ([range($files | length) as $j
+              | "f\($j): file(path: \($files[$j] | @json)) { object { ... on Blob { isTruncated isBinary text } } }"] | join(" "))
+          + " }"')
+
+    # A missing file is a NOT_FOUND error: gh then fails, but the data is complete.
+    # gh writes the body (one line, no newline at the end) to stdout, then
+    # "gh: <messages>" to stderr. gh_request joins both: cut off the messages.
+    # The greedy match keeps a "}gh: " in a file text.
+    # Short options: BSD head (macOS) has no long options.
+    gh_request api graphql -f query="$query" | head -n 1 | sed -e 's/\(.*}\)gh: .*$/\1/' >| "$3" || true
+    if ! jq --exit-status '.data != null and ([.errors[]? | select(.type != "NOT_FOUND")] | length == 0)' "$3" &> /dev/null; then
+        log WARN "Prefetch failed, the scan fetches these files one by one: $(head -c 300 "$3")"
+        return 0
+    fi
+
+    # Records, each field ends with NUL: "branch", name, branch, commit
+    # or "file", name, commit, file, "found" or "404", content.
+    local kind name branch commit file state content dir written=0
+    while IFS= read -r -d '' kind; do
+        if [[ "$kind" == "branch" ]]; then
+            IFS= read -r -d '' name
+            IFS= read -r -d '' branch
+            IFS= read -r -d '' commit
+            dir="$CACHE_DIR/api/repos/$OWNER/$name/branches"
+            if [[ -n "$commit" ]]; then
+                write_cache_entry "$dir/$branch" "$commit"
+                rm -f "$dir/$branch.404"
+            else
+                write_cache_entry "$dir/$branch.404" "gh: Not Found (HTTP 404)"
+                rm -f "$dir/$branch"
+            fi
+            continue
+        fi
+        IFS= read -r -d '' name
+        IFS= read -r -d '' commit
+        IFS= read -r -d '' file
+        IFS= read -r -d '' state
+        IFS= read -r -d '' content
+        dir="$CACHE_DIR/api/repos/$OWNER/$name/commit/$commit"
+        if [[ "$state" == "found" ]]; then
+            # Like "$(gh ...)" in gh_cached: without the newlines at the end.
+            while [[ "$content" == *$'\n' ]]; do
+                content="${content%$'\n'}"
+            done
+            write_cache_entry "$dir/$file" "$content"
+            rm -f "$dir/$file.404"
+        else
+            write_cache_entry "$dir/$file.404" "gh: Not Found (HTTP 404)"
+            rm -f "$dir/$file"
+        fi
+        written=$((written + 1))
+    done < <(jq --join-output --arg batch "$1" --arg files "$2" '
+        ($files | split(" ")) as $files
+        | [$batch | split("\n")[] | select(length > 0) | split("\t")] as $repos
+        | [.errors[]? | select(.type == "NOT_FOUND") | "\(.path[0])/\(.path[-1])"] as $missing
+        | range($repos | length) as $i
+        | $repos[$i] as $r
+        | .data["r\($i)"] as $repo
+        | select($repo != null)
+        | ($repo.object // $repo.ref.target) as $commit
+        | if ($r[2] // "") == "" and $repo.ref == null then
+              ["branch", $r[0], $r[1], ""]
+          elif $commit.oid == null then
+              empty
+          else
+              (if ($r[2] // "") == "" then ["branch", $r[0], $r[1], $commit.oid] else empty end),
+              (range($files | length) as $j
+               | $commit["f\($j)"] as $f
+               | if $f == null and ($missing | index(["r\($i)/f\($j)"])) != null then
+                     ["file", $r[0], $commit.oid, $files[$j], "404", ""]
+                 elif $f.object.text != null and $f.object.isTruncated == false and $f.object.isBinary == false then
+                     ["file", $r[0], $commit.oid, $files[$j], "found", $f.object.text]
+                 else
+                     empty
+                 end)
+          end
+        | map(. + "\u0000") | add' "$3")
+    log INFO "Prefetch: $written files written to the cache"
+}
+
 #===============================================================================
 # MAIN SCANNING LOGIC
 #===============================================================================
@@ -2265,6 +2431,7 @@ main() {
 
     # Fetch repositories
     fetch_repos
+    prefetch_dependency_files
 
     # Scan repositories
     scan_repos
