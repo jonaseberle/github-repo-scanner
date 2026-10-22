@@ -80,6 +80,9 @@ Options (values only in the form --option=value):
   --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a
                       regex, all branches
+  --hide-merged       Optional, with --branches: hide branches that are fully
+                      merged into the default branch (squash and rebase merges
+                      are not detected)
   --delay=<seconds>   Optional: delay after each network request (default: 1);
                       requests served from the cache do not wait
   --alternativePaths[=regex]
@@ -254,6 +257,7 @@ var/cache/
     api/orgs/NAME                               gh api orgs/NAME
     api/repos/OWNER/REPO/
         branches?per_page=100                   gh api --paginate repos/OWNER/REPO/branches?per_page=100
+        compare/SHA1...SHA2                     gh api repos/OWNER/REPO/compare/SHA1...SHA2 (for --hide-merged)
         ref/main/composer.lock                  gh api repos/OWNER/REPO/contents/composer.lock?ref=main
         ref/feat/x/composer.lock                gh api repos/OWNER/REPO/contents/composer.lock?ref=feat/x
         ref/feat/x/tree?recursive=1             gh api repos/OWNER/REPO/git/trees/feat/x?recursive=1 (for --alternativePaths)
