@@ -23,6 +23,7 @@ BOLD=$'\033[1m'
 # Default values
 DELAY=1
 BRANCH=""
+BRANCHES=""
 ALTERNATIVE_PATHS=""
 SHOW_VISIBILITY=0
 CACHE_DIR="./var/cache"
@@ -48,6 +49,8 @@ BELOW_COUNT=0
 FOUND_COUNT=0
 NO_FILE_COUNT=0
 NOT_FOUND_COUNT=0
+BRANCHES_SCANNED=0
+NO_BRANCH_COUNT=0
 # Stays empty for a single repository.
 ARCHIVED_COUNT=""
 
@@ -91,6 +94,11 @@ ${BOLD}OPTIONS:${NC}
 
     --branch <name>     Optional: specific branch to check
                         Default: repository's default branch
+
+    --branches [regex]  Optional: check all branches that match this extended
+                        regular expression, instead of one branch.
+                        Without a regex: check all branches.
+                        Examples: '^feat/|^upgrade/', 'typo3', 'upgrade$'
 
     --delay <seconds>   Optional: delay after each network request (default: 1)
                         Requests served from the cache do not wait.
@@ -297,6 +305,16 @@ parse_args() {
                 BRANCH="$2"
                 shift 2
                 ;;
+            --branches)
+                # The value is optional: without it, match all branches.
+                if [[ $# -ge 2 && "$2" != -* ]]; then
+                    BRANCHES="$2"
+                    shift 2
+                else
+                    BRANCHES="."
+                    shift
+                fi
+                ;;
             --delay)
                 DELAY="$2"
                 shift 2
@@ -393,7 +411,7 @@ interactive_mode() {
     fi
 
     # Branch (optional)
-    if [[ -z "$BRANCH" ]]; then
+    if [[ -z "$BRANCH" && -z "$BRANCHES" ]]; then
         echo -e "${CYAN}Enter branch name (press Enter for default branch):${NC}"
         read -r -p "> " BRANCH
         echo ""
@@ -663,6 +681,26 @@ is_below_version() {
     fi
 }
 
+# Print the branches of a repository that match --branches, one per line.
+matching_branches() {
+    local request="repos/$OWNER/$1/branches?per_page=100"
+    local names name
+    names=$(gh_cached "api/$request" api --paginate "$request" --jq '.[].name') || {
+        # Only a 404 means "no branches". Other errors must stop the scan.
+        if [[ "$names" == *"(HTTP 404)"* ]]; then
+            return 0
+        fi
+        print_error "Failed to fetch the branches of $OWNER/$1: $names"
+        exit 1
+    }
+    # Branch names contain no spaces or glob characters.
+    for name in $names; do
+        if [[ "$name" =~ $BRANCHES ]]; then
+            echo "$name"
+        fi
+    done
+}
+
 #===============================================================================
 # MAIN SCANNING LOGIC
 #===============================================================================
@@ -670,7 +708,9 @@ is_below_version() {
 scan_repos() {
     echo ""
     echo -e "${BOLD}Scanning $OWNER repositories for $PACKAGE${BELOW_VERSION:+ < $BELOW_VERSION}...${NC}"
-    if [[ -n "$BRANCH" ]]; then
+    if [[ -n "$BRANCHES" ]]; then
+        echo -e "Branches: ${CYAN}matching $BRANCHES${NC}"
+    elif [[ -n "$BRANCH" ]]; then
         echo -e "Branch: ${CYAN}$BRANCH${NC}"
     else
         echo -e "Branch: ${CYAN}default${NC}"
@@ -687,9 +727,6 @@ scan_repos() {
         is_private=$(echo "$repo_line" | jq -r '.isPrivate')
         default_branch=$(echo "$repo_line" | jq -r '.defaultBranchRef.name // "main"')
 
-        # Determine which branch to use
-        local target_branch="${BRANCH:-$default_branch}"
-
         # Visibility
         local visibility
         if [[ "$is_private" == "true" ]]; then
@@ -698,49 +735,66 @@ scan_repos() {
             visibility="public"
         fi
 
-        print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name..."
-
-        # Fetch dependency file
-        local content
-        content=$(fetch_dependency_file "$repo_name" "$target_branch")
-
-        local version_str status
-
-        if [[ "$content" == "NOT_FOUND" ]]; then
-            version_str="N/A"
-            status="no_file"
-            NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
-        elif [[ "$content" == "PARSE_ERROR" ]]; then
-            version_str="Parse error"
-            status="error"
-            NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
-        else
-            # Extract version for the package
-            version_str=$(extract_version "$content" "$PACKAGE" "$TYPE")
-
-            if [[ "$version_str" == "NOT_IN_FILE" ]]; then
-                version_str="Not found"
-                status="not_in_file"
-                NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
-            elif [[ -z "$BELOW_VERSION" ]]; then
-                status="found"
-                FOUND_COUNT=$((FOUND_COUNT + 1))
-            else
-                # Check if below target version
-                if is_below_version "$version_str" "$BELOW_VERSION"; then
-                    status="below"
-                    BELOW_COUNT=$((BELOW_COUNT + 1))
-                else
-                    status="ok"
-                fi
+        # Determine which branches to use
+        local branches target_branch
+        if [[ -n "$BRANCHES" ]]; then
+            branches=$(matching_branches "$repo_name")
+            if [[ -z "$branches" ]]; then
+                NO_BRANCH_COUNT=$((NO_BRANCH_COUNT + 1))
+                continue
             fi
+        else
+            branches="${BRANCH:-$default_branch}"
         fi
 
-        # Store results
-        RESULT_URLS+=("$repo_url")
-        RESULT_VERSIONS+=("$version_str")
-        RESULT_VISIBILITY+=("$visibility")
-        RESULT_STATUS+=("$status")
+        for target_branch in $branches; do
+            BRANCHES_SCANNED=$((BRANCHES_SCANNED + 1))
+
+            print_progress "Scanning repo $i/$TOTAL_REPOS: $repo_name${BRANCHES:+ ($target_branch)}..."
+
+            # Fetch dependency file
+            local content
+            content=$(fetch_dependency_file "$repo_name" "$target_branch")
+
+            local version_str status
+
+            if [[ "$content" == "NOT_FOUND" ]]; then
+                version_str="N/A"
+                status="no_file"
+                NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
+            elif [[ "$content" == "PARSE_ERROR" ]]; then
+                version_str="Parse error"
+                status="error"
+                NO_FILE_COUNT=$((NO_FILE_COUNT + 1))
+            else
+                # Extract version for the package
+                version_str=$(extract_version "$content" "$PACKAGE" "$TYPE")
+
+                if [[ "$version_str" == "NOT_IN_FILE" ]]; then
+                    version_str="Not found"
+                    status="not_in_file"
+                    NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
+                elif [[ -z "$BELOW_VERSION" ]]; then
+                    status="found"
+                    FOUND_COUNT=$((FOUND_COUNT + 1))
+                else
+                    # Check if below target version
+                    if is_below_version "$version_str" "$BELOW_VERSION"; then
+                        status="below"
+                        BELOW_COUNT=$((BELOW_COUNT + 1))
+                    else
+                        status="ok"
+                    fi
+                fi
+            fi
+
+            # Store results
+            # With --branches, a row is a branch: link to it.
+            RESULT_URLS+=("$repo_url${BRANCHES:+/tree/$target_branch}")
+            RESULT_VERSIONS+=("$version_str")
+            RESULT_VISIBILITY+=("$visibility")
+            RESULT_STATUS+=("$status")
+        done
 
     done < <(echo "$REPOS_DATA" | jq -c '.[]')
 
@@ -830,7 +884,9 @@ print_results() {
         fi
     done
 
-    if [[ $has_results -eq 0 ]]; then
+    if [[ ${#RESULT_URLS[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
+    elif [[ $has_results -eq 0 ]]; then
         echo -e "${GREEN}All repositories have $PACKAGE at version $BELOW_VERSION or higher!${NC}"
     fi
 
@@ -839,16 +895,25 @@ print_results() {
     echo "================================================================================"
     echo -e "${BOLD}Summary:${NC}"
     echo "  - Total repos scanned: $TOTAL_REPOS"
+    if [[ -n "$BRANCHES" ]]; then
+        echo "  - Branches scanned: $BRANCHES_SCANNED"
+        echo "  - Repos without a matching branch: $NO_BRANCH_COUNT"
+    fi
     if [[ -n "$ARCHIVED_COUNT" ]]; then
         echo "  - Archived repos: $ARCHIVED_COUNT"
     fi
-    if [[ -n "$BELOW_VERSION" ]]; then
-        echo -e "  - Repos with $PACKAGE below v$BELOW_VERSION: ${RED}$BELOW_COUNT${NC}"
-    else
-        echo -e "  - Repos with $PACKAGE: ${GREEN}$FOUND_COUNT${NC}"
+    # With --branches, the counts are per branch.
+    local rows="Repos"
+    if [[ -n "$BRANCHES" ]]; then
+        rows="Branches"
     fi
-    echo -e "  - Repos without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}"
-    echo -e "  - Repos without $PACKAGE in dependencies: ${CYAN}$NOT_FOUND_COUNT${NC}"
+    if [[ -n "$BELOW_VERSION" ]]; then
+        echo -e "  - $rows with $PACKAGE below v$BELOW_VERSION: ${RED}$BELOW_COUNT${NC}"
+    else
+        echo -e "  - $rows with $PACKAGE: ${GREEN}$FOUND_COUNT${NC}"
+    fi
+    echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}"
+    echo -e "  - $rows without $PACKAGE in dependencies: ${CYAN}$NOT_FOUND_COUNT${NC}"
 
     local requests cache_hits oldest
     read -r requests cache_hits oldest <<< "$(awk '
@@ -902,6 +967,22 @@ main() {
     if [[ -n "$BELOW_VERSION" && ! "$BELOW_VERSION" =~ ^[0-9]+$ ]]; then
         print_error "Version must be a number (major version)."
         exit 1
+    fi
+
+    if [[ -n "$BRANCH" && -n "$BRANCHES" ]]; then
+        print_error "Use either --branch or --branches."
+        exit 1
+    fi
+
+    if [[ -n "$BRANCHES" ]]; then
+        # Status 2 means an invalid regular expression. We want the status of the condition.
+        local regex_status=0
+        # shellcheck disable=SC2319
+        [[ "" =~ $BRANCHES ]] || regex_status=$?
+        if [[ $regex_status -eq 2 ]]; then
+            print_error "Invalid regular expression for --branches: $BRANCHES"
+            exit 1
+        fi
     fi
 
     if [[ $USE_CACHE -eq 1 ]]; then
