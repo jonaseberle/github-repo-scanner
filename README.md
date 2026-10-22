@@ -73,6 +73,9 @@ Options:
   --below <version>   Optional: find packages below this major version
                       (default: find all repos that have the package)
   --branch <name>     Optional: specific branch to check (default: repo's default)
+  --branches [regex]  Optional: check all branches that match this extended
+                      regular expression (instead of one branch); without a
+                      regex, all branches
   --delay <seconds>   Optional: delay after each network request (default: 1);
                       requests served from the cache do not wait
   --alternativePaths <path1[,path2,...]>
@@ -136,6 +139,27 @@ Options:
   --package symfony/console \
   --below 6 \
   --delay 2
+```
+
+### Check all branches that match a regular expression
+
+`--branches` takes an extended regular expression. Each matching branch is one row, linked to the branch. Repositories without a matching branch are only counted in the summary.
+
+```bash
+# Branches that start with feat/ or upgrade/
+./gh-dep-scanner.sh \
+  --url "https://github.com/orgs/YOUR_ORG/repositories" \
+  --type composer \
+  --package typo3/cms-core \
+  --below 13 \
+  --branches '^feat/|^upgrade/'
+
+# Branches that contain "typo3", or end with "upgrade"
+./gh-dep-scanner.sh ... --branches 'typo3'
+./gh-dep-scanner.sh ... --branches 'upgrade$'
+
+# All branches
+./gh-dep-scanner.sh ... --branches
 ```
 
 ### Debug a scan
@@ -231,6 +255,7 @@ var/cache/api/repos/OWNER/REPO/contents/package-lock.json?ref=main.404
 - A file that does not exist is cached too, with the suffix `.404`. Once a request is cached, a scan uses only local data.
 - Other errors (rate limit, authentication, network) are not cached.
 - A `/` in a branch name is stored as `%2F`.
+- The branch list of a repository (for `--branches`) is cached as `api/repos/OWNER/REPO/branches?per_page=100`. Delete it to see new branches.
 - Entries do not expire. To fetch some requests again, delete their entries, for example:
   - `rm var/cache/repo-list/YOUR_ORG` to see new repositories
   - `rm -r var/cache/api/repos/OWNER/REPO` to scan one repository again
