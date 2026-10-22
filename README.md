@@ -277,6 +277,8 @@ var/cache/
   - `rm -r var/cache/api/repos/OWNER/REPO` to scan one repository again
 - To fetch everything again, use `--no-cache` or delete `var/cache`.
 
+Each run logs its GitHub requests and its steps to `./var/log/gh-dep-scanner.log`. At startup, a log of 20 MB or more is cut to its newer half.
+
 ## Sample Output
 
 ```
