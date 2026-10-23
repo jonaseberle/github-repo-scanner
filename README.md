@@ -318,7 +318,7 @@ Rows are grouped: FOUND (the package is in the dependency file), PACKAGE NOT FOU
 
 In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green.
 
-With `--type=node`, the PATH column shows the lock file. A directory with both `package-lock.json` and `yarn.lock` gets a row for each file, and a warning.
+With `--type=node`, the PATH column shows the lock file. A directory with both `package-lock.json` and `yarn.lock` gets a row for each file, a yellow `!` after the path, and a warning.
 
 During the scan, marks show the progress:
 
