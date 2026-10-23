@@ -92,6 +92,11 @@ declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
 declare -a RESULT_PATHS=()
 declare -a RESULT_BRANCHES=()
+# "ahead/behind": the commits of the branch that are not in the default
+# branch, and the other way round. "default" for the default branch.
+declare -a RESULT_BRANCH_STATUS=()
+# The branch status of the branch that is scanned now, for record_result.
+CURRENT_BRANCH_STATUS=""
 declare -a RESULT_PACKAGES=()
 declare -a RESULT_STATUS=()
 
@@ -167,6 +172,8 @@ ${BOLD}OPTIONS:${NC}
     --branches[=regex]  Optional: check all branches that match this extended
                         regular expression, instead of one branch.
                         Without a regex: check all branches.
+                        AHEAD/BEHIND shows the commits of the branch that are
+                        not in the default branch, and the other way round.
                         Examples: --branches='^feat/|^upgrade/'
                                   --branches=typo3 --branches='upgrade$'
 
@@ -177,8 +184,8 @@ ${BOLD}OPTIONS:${NC}
                         (PACKAGE NOT FOUND)
 
     --hide-merged       Optional, with --branches: hide the branches that are
-                        fully merged into the default branch (one request per
-                        100 branches). Squash and rebase merges are not detected.
+                        fully merged into the default branch (ahead 0).
+                        Squash and rebase merges are not detected.
 
     --delay=<seconds>   Optional: delay after each network request (default: 0)
                         Requests served from the cache do not wait.
@@ -1490,59 +1497,58 @@ is_affected() {
     [[ $group -gt 0 && $group_holds -eq 1 ]]
 }
 
-# Print the branches of a repository that match --branches with their
-# commit, "name<TAB>commit", one per line. With --hide-merged, a branch that is
-# fully merged into the default branch ($2) is printed as "merged<TAB>name".
+# Print the branches of repository $1 that match --branches as
+# "name<TAB>commit<TAB>branch status", one per line. With --hide-merged, a
+# branch that is fully merged into the default branch ($2) is printed as
+# "merged<TAB>name".
 matching_branches() {
     local listing
-    if [[ $HIDE_MERGED -eq 1 ]]; then
-        listing=$(branches_with_merge_state "$1" "$2")
-    else
-        local request="repos/$OWNER/$1/branches?per_page=100"
-        # "-": no merge state. Not an empty field: read joins adjacent tabs.
-        listing=$(gh_cached "api/$request&heads" api --paginate "$request" --jq '.[] | "\(.name)\t-\t\(.commit.sha)"') || {
-            # Only a 404 means "no branches". Other errors must stop the scan.
-            if [[ "$(http_status "$listing")" == "404" ]]; then
-                return 0
-            fi
-            print_error "Failed to fetch the branches of $OWNER/$1: $listing"
-            exit 1
-        }
-    fi
+    listing=$(branches_with_status "$1" "$2")
 
     # Branch names contain no spaces, tabs or glob characters.
-    local name behind commit
-    while IFS=$'\t' read -r name behind commit; do
+    local name ahead behind commit status
+    while IFS=$'\t' read -r name ahead behind commit; do
         if [[ -z "$name" || ! "$name" =~ $BRANCHES ]]; then
             continue
         fi
+        if [[ "$name" == "$2" ]]; then
+            status="default"
+        elif [[ "$ahead" == "-" ]]; then
+            # GitHub gave no comparison, e.g. after a timeout.
+            status="?"
+        else
+            status="$ahead/$behind"
+        fi
         # Nothing of the branch is missing in the default branch: it is merged.
-        if [[ "$behind" == "0" && "$name" != "$2" ]]; then
+        if [[ $HIDE_MERGED -eq 1 && "$ahead" == "0" && "$name" != "$2" ]]; then
             printf 'merged\t%s\n' "$name"
         else
-            printf '%s\t%s\n' "$name" "$commit"
+            printf '%s\t%s\t%s\n' "$name" "$commit" "$status"
         fi
     done <<< "$listing"
 }
 
-# Print "name<TAB>commits that are not in the default branch ($2)<TAB>commit"
-# for all branches of repository $1. One GraphQL request per 100 branches,
-# instead of one comparison per branch.
-branches_with_merge_state() {
+# Print "name<TAB>ahead<TAB>behind<TAB>commit" for all branches of repository
+# $1. Ahead: the commits of the branch that are not in the default branch
+# ($2). Behind: the other way round. "-" if GitHub gives no comparison.
+# One GraphQL request per 100 branches, instead of one comparison per branch.
+branches_with_status() {
     # $owner, $name, $base and $endCursor are GraphQL variables, not shell ones.
     # shellcheck disable=SC2016
     local query='query($owner: String!, $name: String!, $base: String!, $endCursor: String) {
         repository(owner: $owner, name: $name) {
             refs(refPrefix: "refs/heads/", first: 100, after: $endCursor) {
                 pageInfo { hasNextPage endCursor }
-                nodes { name target { oid } compare(headRef: $base) { behindBy } }
+                nodes { name target { oid } compare(headRef: $base) { aheadBy behindBy } }
             }
         }
     }'
+    # The branch is the base of the comparison: its "behindBy" are the
+    # commits that only the branch has.
     local listing
-    listing=$(gh_cached "api/repos/$OWNER/$1/branches?merged-into=$2&heads" api graphql --paginate \
+    listing=$(gh_cached "api/repos/$OWNER/$1/branches?compare=$2&heads" api graphql --paginate \
         -f owner="$OWNER" -f name="$1" -f base="$2" -f query="$query" \
-        --jq '.data.repository.refs.nodes[] | "\(.name)\t\(.compare.behindBy // "-")\t\(.target.oid)"') || {
+        --jq '.data.repository.refs.nodes[] | "\(.name)\t\(.compare.behindBy // "-")\t\(.compare.aheadBy // "-")\t\(.target.oid)"') || {
         print_error "Failed to fetch the branches of $OWNER/$1: $listing"
         exit 1
     }
@@ -1624,7 +1630,7 @@ REPO_CANDIDATES=""
 collect_candidates() {
     REPO_CANDIDATES=""
     local branch commit listing dir file
-    while IFS=$'\t' read -r branch commit; do
+    while IFS=$'\t' read -r branch commit _; do
         if [[ -z "$commit" || $'\n'"$REPO_CANDIDATES" == *$'\n'"$commit"$'\t'* ]]; then
             continue
         fi
@@ -1650,7 +1656,7 @@ prefetch_repo_files() {
         return 0
     fi
     local pending="" count=0 branch commit candidate dir file path paths base
-    while IFS=$'\t' read -r branch commit; do
+    while IFS=$'\t' read -r branch commit _; do
         if [[ -z "$commit" || "$pending" == *$'\t'"$commit"$'\t'* ]]; then
             continue
         fi
@@ -1873,6 +1879,7 @@ record_result() {
     log DEBUG "Result: $1 branch=$2 path=$3 package=$5 version=$version_str status=$status"
     RESULT_URLS+=("$1")
     RESULT_BRANCHES+=("$2")
+    RESULT_BRANCH_STATUS+=("$CURRENT_BRANCH_STATUS")
     RESULT_PATHS+=("$3")
     RESULT_VISIBILITY+=("$4")
     RESULT_PACKAGES+=("$5")
@@ -1954,12 +1961,12 @@ scan_repos() {
             branches=$(printf '%s\t%s' "$target_branch" "$default_commit")
         fi
 
-        # One line per branch: "name<TAB>commit".
+        # One line per branch: "name<TAB>commit<TAB>branch status".
         collect_candidates "$repo_name" "$branches"
         prefetch_repo_files "$repo_name" "$branches"
         local branch_count branch_number=0 commit
         branch_count=$(echo "$branches" | awk 'NF > 0 { n++ } END { print n + 0 }')
-        while IFS=$'\t' read -r target_branch commit; do
+        while IFS=$'\t' read -r target_branch commit CURRENT_BRANCH_STATUS; do
             if [[ -z "$target_branch" ]]; then
                 continue
             fi
@@ -2102,6 +2109,7 @@ URL_COLUMN_WIDTH=55
 VERSION_COLUMN_WIDTH=15
 PATH_COLUMN_WIDTH=4
 BRANCH_COLUMN_WIDTH=6
+BRANCH_STATUS_COLUMN_WIDTH=12
 PACKAGE_COLUMN_WIDTH=7
 
 # Fit the columns to the longest values and to the terminal width.
@@ -2110,6 +2118,8 @@ PACKAGE_COLUMN_WIDTH=7
 # wraps at spaces), then the URL (it gets its own line, because a URL never wraps).
 set_column_widths() {
     local i url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
+    # The width of the header "AHEAD/BEHIND".
+    local status_width=12
     for i in "${!RESULT_STATUS[@]}"; do
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
@@ -2122,6 +2132,9 @@ set_column_widths() {
         fi
         if show_branch_column && [[ ${#RESULT_BRANCHES[$i]} -gt $branch_width ]]; then
             branch_width=${#RESULT_BRANCHES[$i]}
+        fi
+        if show_branch_column && [[ ${#RESULT_BRANCH_STATUS[$i]} -gt $status_width ]]; then
+            status_width=${#RESULT_BRANCH_STATUS[$i]}
         fi
         if [[ ${#RESULT_PACKAGES[$i]} -gt $package_width ]]; then
             package_width=${#RESULT_PACKAGES[$i]}
@@ -2146,6 +2159,8 @@ set_column_widths() {
         if [[ $branch_width -lt 6 ]]; then
             branch_width=6
         fi
+        # The branch status does not shrink: it is short.
+        available=$((available - 1 - BRANCH_STATUS_COLUMN_WIDTH))
     fi
     if [[ $SHOW_VISIBILITY -eq 1 ]]; then
         available=$((available - 11))
@@ -2182,6 +2197,7 @@ set_column_widths() {
     VERSION_COLUMN_WIDTH=$version_width
     PATH_COLUMN_WIDTH=$path_width
     BRANCH_COLUMN_WIDTH=$branch_width
+    BRANCH_STATUS_COLUMN_WIDTH=$status_width
     PACKAGE_COLUMN_WIDTH=$package_width
 }
 
@@ -2196,37 +2212,40 @@ show_path_column() {
     [[ -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" ]]
 }
 
-# Arguments: color, URL, branch, path, package, version, visibility, and
-# optionally the color of the version and a mark for the end of the row.
+# Arguments: color, URL, branch, branch status, path, package, version,
+# visibility, and optionally the color of the version and a mark for the end
+# of the row.
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
 # A branch does not wrap either: a branch that is too wide gets a line of its
 # own, from the branch column on, or further left if the line is too short.
 print_row() {
+    local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
+    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}"
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
-    local version_color="${8:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY"
-    if [[ -z "$1" || "$1" == "$BOLD" ]]; then
-        branch_color="$1" path_color="$1" package_color="$1" version_color="$1" visibility_color="$1"
+    local version_color="${version_color_arg:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY"
+    if [[ -z "$row_color" || "$row_color" == "$BOLD" ]]; then
+        branch_color="$row_color" path_color="$row_color" package_color="$row_color" version_color="$row_color" visibility_color="$row_color"
     fi
 
-    local -a url_lines=("$2") branch_lines=() path_lines=() package_lines=() version_lines=()
+    local -a url_lines=("$url") branch_lines=() path_lines=() package_lines=() version_lines=()
     local line cell
-    if [[ ${#2} -gt $URL_COLUMN_WIDTH ]]; then
-        printf "%s%s%s\n" "$1" "$2" "$NC"
+    if [[ ${#url} -gt $URL_COLUMN_WIDTH ]]; then
+        printf "%s%s%s\n" "$row_color" "$url" "$NC"
         url_lines=("")
     fi
-    if show_branch_column && [[ ${#3} -gt $BRANCH_COLUMN_WIDTH ]]; then
+    if show_branch_column && [[ ${#branch} -gt $BRANCH_COLUMN_WIDTH ]]; then
         # Keep the last column free, as in set_column_widths.
-        local start=$((URL_COLUMN_WIDTH + 1)) latest=$((TERM_COLUMNS - 1 - ${#3}))
+        local start=$((URL_COLUMN_WIDTH + 1)) latest=$((TERM_COLUMNS - 1 - ${#branch}))
         if [[ -n "${url_lines[0]}" && $start -le $latest ]]; then
-            printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "$2"
-            printf "%s%s%s %s%s%s\n" "$1" "$cell" "$NC" "$branch_color" "$3" "$NC"
+            printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "$url"
+            printf "%s%s%s %s%s%s\n" "$row_color" "$cell" "$NC" "$branch_color" "$branch" "$NC"
         else
             if [[ -n "${url_lines[0]}" ]]; then
-                printf "%s%s%s\n" "$1" "$2" "$NC"
+                printf "%s%s%s\n" "$row_color" "$url" "$NC"
             fi
             if [[ $start -gt $latest ]]; then
                 start=$latest
@@ -2234,36 +2253,36 @@ print_row() {
             if [[ $start -lt 0 ]]; then
                 start=0
             fi
-            printf "%*s%s%s%s\n" "$start" "" "$branch_color" "$3" "$NC"
+            printf "%*s%s%s%s\n" "$start" "" "$branch_color" "$branch" "$NC"
         fi
         url_lines=("")
         branch_lines=("")
     elif show_branch_column; then
-        branch_lines=("$3")
+        branch_lines=("$branch")
     fi
     # A cell that fits needs no wrap: no subshell for most rows.
     if ! show_path_column; then
         :
-    elif [[ ${#4} -le $PATH_COLUMN_WIDTH ]]; then
-        path_lines=("$4")
+    elif [[ ${#path} -le $PATH_COLUMN_WIDTH ]]; then
+        path_lines=("$path")
     else
         while IFS= read -r line; do
             path_lines+=("$line")
-        done < <(wrap_path "$PATH_COLUMN_WIDTH" "$4")
+        done < <(wrap_path "$PATH_COLUMN_WIDTH" "$path")
     fi
-    if [[ ${#5} -le $PACKAGE_COLUMN_WIDTH ]]; then
-        package_lines=("$5")
+    if [[ ${#package} -le $PACKAGE_COLUMN_WIDTH ]]; then
+        package_lines=("$package")
     else
         while IFS= read -r line; do
             package_lines+=("$line")
-        done < <(wrap_path "$PACKAGE_COLUMN_WIDTH" "$5")
+        done < <(wrap_path "$PACKAGE_COLUMN_WIDTH" "$package")
     fi
-    if [[ ${#6} -le $VERSION_COLUMN_WIDTH ]]; then
-        version_lines=("$6")
+    if [[ ${#version} -le $VERSION_COLUMN_WIDTH ]]; then
+        version_lines=("$version")
     else
         while IFS= read -r line; do
             version_lines+=("$line")
-        done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$6")
+        done < <(wrap_text "$VERSION_COLUMN_WIDTH" "$version")
     fi
 
     local count=${#url_lines[@]}
@@ -2284,9 +2303,15 @@ print_row() {
     local i row
     for ((i = 0; i < count; i++)); do
         printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
-        row="$1$cell$NC"
+        row="$row_color$cell$NC"
         if show_branch_column; then
             printf -v cell "%-*s" "$BRANCH_COLUMN_WIDTH" "${branch_lines[$i]:-}"
+            row+=" $branch_color$cell$NC"
+            cell=""
+            if [[ $i -eq 0 ]]; then
+                cell="$branch_status"
+            fi
+            printf -v cell "%-*s" "$BRANCH_STATUS_COLUMN_WIDTH" "$cell"
             row+=" $branch_color$cell$NC"
         fi
         if show_path_column; then
@@ -2301,13 +2326,13 @@ print_row() {
             printf -v cell "%-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
             row+=" $version_color$cell$NC"
             if [[ $i -eq 0 ]]; then
-                row+=" $visibility_color$7$NC"
+                row+=" $visibility_color$visibility$NC"
             fi
         else
             row+=" $version_color${version_lines[$i]:-}$NC"
         fi
-        if [[ $i -eq 0 && -n "${9:-}" ]]; then
-            row+=" $COLOR_AFFECTED$9$NC"
+        if [[ $i -eq 0 && -n "${mark:-}" ]]; then
+            row+=" $COLOR_AFFECTED$mark$NC"
         fi
         printf "%s\n" "$row"
     done
@@ -2326,8 +2351,8 @@ print_results() {
 
     # Print header
     set_column_widths
-    print_row "$BOLD" "REPO URL" "BRANCH" "PATH" "PACKAGE" "VERSION" "VISIBILITY"
-    print_row "" "--------" "------" "----" "-------" "-------" "----------"
+    print_row "$BOLD" "REPO URL" "BRANCH" "AHEAD/BEHIND" "PATH" "PACKAGE" "VERSION" "VISIBILITY"
+    print_row "" "--------" "------" "------------" "----" "-------" "-------" "----------"
 
     local has_results=0
 
@@ -2360,6 +2385,7 @@ print_results() {
         local visibility="${RESULT_VISIBILITY[$i]}"
         local path="${RESULT_PATHS[$i]}"
         local branch="${RESULT_BRANCHES[$i]}"
+        local branch_status="${RESULT_BRANCH_STATUS[$i]}"
         local package="${RESULT_PACKAGES[$i]}"
 
         case "$status" in
@@ -2377,18 +2403,18 @@ print_results() {
         # With --affected, the color of the version and a "*" at the end show
         # whether it is affected. Not affected rows do not count as results.
         if [[ "$status" == "affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*"
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED"
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            print_row "$YELLOW" "$url" "$branch" "$path" "$package" "$version" "$visibility"
+            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            print_row "$CYAN" "$url" "$branch" "$path" "$package" "$version" "$visibility"
+            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility"
             has_results=1
         fi
     done
