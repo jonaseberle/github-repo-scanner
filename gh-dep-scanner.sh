@@ -1281,7 +1281,7 @@ refresh_pushed_repos() {
 #===============================================================================
 
 # Fetch the file $3 (a path, e.g. "webroot/yarn.lock") of commit $2.
-# Prints its content, or NOT_FOUND or PARSE_ERROR.
+# Prints its content, or NOT_FOUND.
 fetch_dependency_file() {
     local repo_name="$1"
     local commit="$2"
@@ -1301,12 +1301,8 @@ fetch_dependency_file() {
         return
     }
 
-    # yarn.lock is not JSON.
-    if [[ "$file" != *.json ]] || echo "$response" | jq --exit-status 'type == "object"' &> /dev/null; then
-        echo "$response"
-    else
-        echo "PARSE_ERROR"
-    fi
+    # list_packages finds parse errors: one jq parse per file, not two.
+    echo "$response"
 }
 
 # Print the dependency files of commit $2 as "directory<TAB>file", one per
@@ -1363,21 +1359,24 @@ packages_label() {
 
 # Print all packages of a dependency file: "name<TAB>version", one per line.
 # A name that is listed twice (e.g. in require and require-dev) is printed once.
+# Fails if jq cannot parse the file, or if it is not a JSON object.
 list_packages() {
     local content="$1"
     local dep_type="$2"
+    # A dependency file in JSON is an object.
+    local object='if type != "object" then error("not an object") else . end | '
 
     {
         if [[ "$dep_type" == "composer" ]]; then
             # packages first, then packages-dev
-            echo "$content" | jq -r '((.packages // []), (.["packages-dev"] // []))[] | "\(.name)\t\(.version)"' 2>/dev/null
+            echo "$content" | jq -r "$object"'((.packages // []), (.["packages-dev"] // []))[] | "\(.name)\t\(.version)"' 2>/dev/null
         elif [[ "$dep_type" == "composerJson" ]]; then
             # require first, then require-dev
-            echo "$content" | jq -r '((.require // {}), (.["require-dev"] // {})) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null
-        elif [[ "$dep_type" == "node" && "$content" == "{"* ]]; then
+            echo "$content" | jq -r "$object"'((.require // {}), (.["require-dev"] // {})) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null
+        elif [[ "$dep_type" == "node" && "$content" =~ ^[[:space:]]*[{[] ]]; then
             # package-lock.json: "packages" since lockfileVersion 2, "dependencies" in version 1.
             # Use the top-level node_modules entries: nested ones belong to other packages.
-            echo "$content" | jq -r '
+            echo "$content" | jq -r "$object"'
                 if .packages then
                     .packages | to_entries[]
                     | select(.key | startswith("node_modules/"))
@@ -1408,19 +1407,19 @@ list_packages() {
                 }'
         else
             # dependencies first, then devDependencies
-            echo "$content" | jq -r '((.dependencies // {}), (.devDependencies // {})) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null
+            echo "$content" | jq -r "$object"'((.dependencies // {}), (.devDependencies // {})) | to_entries[] | "\(.key)\t\(.value)"' 2>/dev/null
         fi
     } | awk -F '\t' '!seen[$1]++'
 }
 
-# Print the packages of a dependency file that match --packages.
+# Print the packages of the list $1 (see list_packages) that match --packages.
 matching_packages() {
     local name version
     while IFS=$'\t' read -r name version; do
         if [[ -n "$name" && "$name" =~ $PACKAGES ]]; then
             printf '%s\t%s\n' "$name" "$version"
         fi
-    done < <(list_packages "$1" "$TYPE")
+    done <<< "$1"
 }
 
 #===============================================================================
@@ -1926,16 +1925,20 @@ record_result() {
 }
 
 # Add one result row per matching package of a dependency file.
-# Arguments: URL, branch, path, visibility, content (or NOT_FOUND / PARSE_ERROR)
+# Arguments: URL, branch, path, visibility, content (or NOT_FOUND)
 record_file() {
     local content="$5"
-    if [[ "$content" == "NOT_FOUND" || "$content" == "PARSE_ERROR" ]]; then
+    if [[ "$content" == "NOT_FOUND" ]]; then
         record_result "$1" "$2" "$3" "$4" "" "$content"
         return
     fi
 
-    local packages name version
-    packages=$(matching_packages "$content")
+    local listing packages name version
+    if ! listing=$(list_packages "$content" "$TYPE"); then
+        record_result "$1" "$2" "$3" "$4" "" "PARSE_ERROR"
+        return
+    fi
+    packages=$(matching_packages "$listing")
     if [[ -z "$packages" ]]; then
         record_result "$1" "$2" "$3" "$4" "" "NOT_IN_FILE"
         return
