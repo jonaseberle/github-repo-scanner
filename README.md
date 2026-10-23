@@ -80,12 +80,14 @@ Options (values only in the form --option=value):
   --branch=<name>     Optional: specific branch to check (default: repo's default)
   --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a
-                      regex, all branches
+                      regex, all branches. AHEAD/BEHIND shows the commits of
+                      the branch that are not in the default branch, and the
+                      other way round
   --hide-unknown      Optional: hide rows without a dependency file
   --hide-absent       Optional: also hide rows without a matching package
   --hide-merged       Optional, with --branches: hide branches that are fully
-                      merged into the default branch (one request per 100
-                      branches; squash and rebase merges are not detected)
+                      merged into the default branch (ahead 0; squash and
+                      rebase merges are not detected)
   --delay=<seconds>   Optional: delay after each network request (default: 0);
                       requests served from the cache do not wait. Without it,
                       the scan slows down when less than 20 % of the rate
@@ -254,8 +256,7 @@ var/cache/
     repo-view/OWNER/REPO                        gh repo view OWNER/REPO
     api/repos/OWNER/REPO/
         branches/main                           the commit of branch main
-        branches?per_page=100&heads             all branches with their commits (for --branches)
-        branches?merged-into=main&heads         the same, with the merge state (for --hide-merged)
+        branches?compare=main&heads             all branches with their commits and ahead/behind (for --branches)
         commit/<sha>/composer.lock              the file in commit <sha>
         commit/<sha>/tree?recursive=1           the file list (for --alternativePaths)
         commit/<sha>/webroot/composer.lock      a file in a subdirectory
