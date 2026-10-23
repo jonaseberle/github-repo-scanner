@@ -89,7 +89,8 @@ Options (values only in the form --option=value):
   --excludePaths=<regex>
                       Optional, with --alternativePaths: do not check the
                       directories that match this extended regular
-                      expression, e.g. --excludePaths=node_modules
+                      expression, e.g. --excludePaths=node_modules (default
+                      with --type=nodeEngines: node_modules/)
   --show-visibility   Optional: add a column with the repo visibility
   --offline           Optional: use the cached repository list and do not check
                       for pushes (a cached scan then needs no network)
