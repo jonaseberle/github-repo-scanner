@@ -100,7 +100,8 @@ Options (values only in the form --option=value):
                       the colors) or PDF (that HTML, printed by a headless
                       Chromium or Google Chrome; CHROMIUM=<path> for another).
                       A relative path is below ./output. Without a file:
-                      <owner>_<packages>, e.g. dmind-gmbh_typo3-cms-core.pdf
+                      <owner>_<packages>, e.g. dmind-gmbh_typo3-cms-core.pdf.
+                      An existing file stays: the new one gets -1, -2, ...
   --offline           Optional: use the cached repository list and do not check
                       for pushes (a cached scan then needs no network)
   --cache-repo-list-max-age=<minutes>
