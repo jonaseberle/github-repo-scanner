@@ -90,7 +90,9 @@ Options (values only in the form --option=value):
                       Optional, with --alternativePaths: do not check the
                       directories that match this extended regular
                       expression, e.g. --excludePaths=node_modules (default
-                      with --type=nodeEngines: node_modules/)
+                      with --type=nodeEngines: node_modules/, bower_components/,
+                      jspm_packages/, web_modules/, vendor/, .yarn/,
+                      .pnpm-store/)
   --show-visibility   Optional: add a column with the repo visibility
   --offline           Optional: use the cached repository list and do not check
                       for pushes (a cached scan then needs no network)
