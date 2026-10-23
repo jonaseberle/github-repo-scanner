@@ -100,6 +100,8 @@ declare -a RESULT_URLS=()
 declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
 declare -a RESULT_PATHS=()
+# 1: the directory of the path has package-lock.json and yarn.lock.
+declare -a RESULT_LOCK_CONFLICT=()
 declare -a RESULT_BRANCHES=()
 # With --branches: "ahead/behind", the commits of the branch that are not in
 # the default branch, and the other way round. "default" for the default
@@ -1916,6 +1918,7 @@ record_result() {
     RESULT_BRANCHES+=("$2")
     RESULT_BRANCH_STATUS+=("$CURRENT_BRANCH_STATUS")
     RESULT_PATHS+=("$3")
+    RESULT_LOCK_CONFLICT+=(0)
     RESULT_VISIBILITY+=("$4")
     RESULT_PACKAGES+=("$5")
     RESULT_VERSIONS+=("$version_str")
@@ -1942,6 +1945,21 @@ record_file() {
     done <<< "$packages"
 }
 
+
+# Set RESULT_LOCK_CONFLICT for the rows from number $1 on whose path is in
+# one of the directories $2 (one per line).
+mark_lock_conflicts() {
+    local i dir
+    for ((i = $1; i < ${#RESULT_STATUS[@]}; i++)); do
+        dir="."
+        if [[ "${RESULT_PATHS[$i]}" == */* ]]; then
+            dir="${RESULT_PATHS[$i]%/*}"
+        fi
+        if [[ $'\n'"$2" == *$'\n'"$dir"$'\n'* ]]; then
+            RESULT_LOCK_CONFLICT[i]=1
+        fi
+    done
+}
 
 scan_repos() {
     echo ""
@@ -2031,7 +2049,7 @@ scan_repos() {
 
             # One row per found file. Two lock files in one directory (package-lock.json
             # and yarn.lock) are a mistake: each gets a row, and a warning.
-            local found=0 found_dirs=""
+            local found=0 found_dirs="" conflict_dirs="" first_row=${#RESULT_STATUS[@]}
             while IFS=$'\t' read -r dir file; do
                 if [[ -z "$file" ]]; then
                     continue
@@ -2048,6 +2066,7 @@ scan_repos() {
                 if [[ $'\n'"$found_dirs" == *$'\n'"$dir"$'\n'* ]]; then
                     LOCK_CONFLICT_COUNT=$((LOCK_CONFLICT_COUNT + 1))
                     print_warning_line "$OWNER/$repo_name ($target_branch), directory $dir: package-lock.json and yarn.lock. Use one package manager."
+                    conflict_dirs+="$dir"$'\n'
                 fi
                 found_dirs+="$dir"$'\n'
                 # The PATH column: the lock file with --type=node (there can be two), else the directory.
@@ -2056,6 +2075,10 @@ scan_repos() {
                 fi
                 record_file "$repo_url" "$target_branch" "$path" "$visibility" "$content"
             done <<< "$candidates"
+            # The row of the first lock file is recorded before the second one is found.
+            if [[ -n "$conflict_dirs" ]]; then
+                mark_lock_conflicts "$first_row" "$conflict_dirs"
+            fi
             if [[ $found -eq 0 ]]; then
                 record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
             fi
@@ -2151,7 +2174,7 @@ PACKAGE_COLUMN_WIDTH=7
 # its own line), path and package (they wrap after a "/"), then the version (it
 # wraps at spaces), then the URL (it gets its own line, because a URL never wraps).
 set_column_widths() {
-    local i url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
+    local i width url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
     for i in "${!RESULT_STATUS[@]}"; do
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
@@ -2159,8 +2182,13 @@ set_column_widths() {
         if [[ ${#RESULT_VERSIONS[$i]} -gt $version_width ]]; then
             version_width=${#RESULT_VERSIONS[$i]}
         fi
-        if show_path_column && [[ ${#RESULT_PATHS[$i]} -gt $path_width ]]; then
-            path_width=${#RESULT_PATHS[$i]}
+        # The " !" of a lock file conflict (see print_row).
+        width=${#RESULT_PATHS[$i]}
+        if [[ ${RESULT_LOCK_CONFLICT[$i]} -eq 1 ]]; then
+            width=$((width + 2))
+        fi
+        if show_path_column && [[ $width -gt $path_width ]]; then
+            path_width=$width
         fi
         # The branch with its status, as print_row shows it.
         if show_branch_column; then
@@ -2280,8 +2308,8 @@ branch_label() {
 }
 
 # Arguments: color, URL, branch, branch status (see branch_label), path, package, version,
-# visibility, and optionally the color of the version and a mark for the end
-# of the row.
+# visibility, and optionally the color of the version, a mark for the end
+# of the row and 1 for a lock file conflict (a yellow "!" after the path).
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
@@ -2289,7 +2317,7 @@ branch_label() {
 # own, from the branch column on, or further left if the line is too short.
 print_row() {
     local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
-    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}"
+    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" lock_conflict="${11:-0}"
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
@@ -2334,6 +2362,10 @@ print_row() {
         branch_lines=("")
     elif show_branch_column; then
         branch_lines=("$branch")
+    fi
+    # Before the width checks: set_column_widths counts the " !" too.
+    if [[ $lock_conflict -eq 1 ]]; then
+        path+=" !"
     fi
     # A cell that fits needs no wrap: no subshell for most rows.
     if ! show_path_column; then
@@ -2385,6 +2417,11 @@ print_row() {
         fi
         if show_path_column; then
             printf -v cell "%-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
+            # Pad first, then color the "!": the color codes have no width.
+            if [[ $lock_conflict -eq 1 && "${path_lines[$i]:-}" == *" !" && $((i + 1)) -eq ${#path_lines[@]} ]]; then
+                local text="${path_lines[$i]% !}"
+                cell="$text $YELLOW!$NC$path_color${cell:$((${#text} + 2))}"
+            fi
             row+=" $path_color$cell$NC"
         fi
         # Color the text only: an underline must not run over the padding.
@@ -2463,6 +2500,7 @@ print_results() {
         local path="${RESULT_PATHS[$i]}"
         local branch="${RESULT_BRANCHES[$i]}"
         local branch_status="${RESULT_BRANCH_STATUS[$i]}"
+        local lock_conflict="${RESULT_LOCK_CONFLICT[$i]}"
         local package="${RESULT_PACKAGES[$i]}"
 
         case "$status" in
@@ -2480,18 +2518,18 @@ print_results() {
         # With --affected, the color of the version and a "*" at the end show
         # whether it is affected. Not affected rows do not count as results.
         if [[ "$status" == "affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$lock_conflict"
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$lock_conflict"
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$lock_conflict"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility"
+            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$lock_conflict"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility"
+            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$lock_conflict"
             has_results=1
         fi
     done
