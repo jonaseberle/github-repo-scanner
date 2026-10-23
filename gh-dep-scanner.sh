@@ -64,6 +64,9 @@ fi
 LOG_TIME=""
 LOG_TIME_SECOND=-1
 USE_CACHE=1
+# --cache-repo-list-max-age: use the cached repository list without a check
+# for changes (3 requests) if it was checked less than this many minutes ago.
+REPO_LIST_MAX_AGE=30
 OFFLINE=0
 # Terminal width, for the progress line and the result table.
 TERM_COLUMNS=$(tput cols 2>/dev/null || echo 80)
@@ -217,13 +220,18 @@ ${BOLD}OPTIONS:${NC}
     --offline           Optional: use the cached repository list and do not
                         check for pushes. Once cached, a scan needs no network.
 
+    --cache-repo-list-max-age=<minutes>
+                        Optional: use the cached repository list without a
+                        check for changes (3 requests) if the last check is
+                        younger than this (default: 30; 0: always check)
+
     --no-cache          Optional: do not read the cache in ./var/cache.
                         New responses are still written to it.
                         To fetch one request again, delete its entry there.
 
     -v, --verbose       Print each command before it runs (set -x)
 
-    --help              Show this help message
+    -h, --help          Show this help message
 
 ${BOLD}EXAMPLES:${NC}
     # Interactive mode
@@ -869,6 +877,9 @@ parse_args() {
             --delay=*)
                 DELAY="${1#*=}"
                 ;;
+            --cache-repo-list-max-age=*)
+                REPO_LIST_MAX_AGE="${1#*=}"
+                ;;
             --alternativePaths=*)
                 ALTERNATIVE_PATHS="${1#*=}"
                 ;;
@@ -901,11 +912,11 @@ parse_args() {
             -v|--verbose)
                 set -x
                 ;;
-            --help)
+            -h|--help)
                 show_help
                 exit 0
                 ;;
-            --url|--type|--affected|--repo|--branch|--delay)
+            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;
@@ -1205,6 +1216,14 @@ fetch_repo_list() {
         log INFO "Fetching the full repository list: $endpoint"
         listing=$(gh_fresh "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
         write_cache_entry "$full" ""
+    elif [[ $(($(date +%s) - $(file_mtime "$file"))) -lt $((REPO_LIST_MAX_AGE * 60)) ]]; then
+        # Each check writes the list: its age is the time since the last check.
+        local age
+        age=$(format_age $(($(date +%s) - $(file_mtime "$file"))))
+        log INFO "Repository list: from the cache, checked $age ago (--cache-repo-list-max-age=$REPO_LIST_MAX_AGE)"
+        # On stderr: stdout is the list.
+        print_info "Repository list from the cache, checked $age ago (--cache-repo-list-max-age=$REPO_LIST_MAX_AGE)." >&2
+        listing=$(gh_cached "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
     else
         local changed count
         changed=$(changed_repos pushed pushedAt && changed_repos updated updatedAt) || return 1
@@ -2623,6 +2642,11 @@ main() {
 
     parse_affected
 
+    if [[ ! "$REPO_LIST_MAX_AGE" =~ ^[0-9]+$ ]]; then
+        print_error "--cache-repo-list-max-age needs a number of minutes, e.g. --cache-repo-list-max-age=60."
+        exit 1
+    fi
+
     # A number of seconds, as "sleep" takes it.
     if [[ ! "$DELAY" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
         print_error "--delay needs a number of seconds, e.g. --delay=0.5."
@@ -2654,7 +2678,7 @@ main() {
         print_info "$(rate_limit_summary)"
     fi
 
-    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE offline=$OFFLINE delay=$DELAY"
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"
