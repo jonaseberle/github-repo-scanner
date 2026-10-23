@@ -31,6 +31,8 @@ This script fills that gap.
 - **[GitHub CLI (gh)](https://cli.github.com/)** - must be installed and authenticated
 - **[jq](https://jqlang.github.io/jq/)** - JSON parser
 
+The script needs its `lib/` directory next to it. A symlink to the script works.
+
 ### Installation
 
 ```bash

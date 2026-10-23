@@ -27,7 +27,7 @@ Keep commit messages clean, descriptive, and focused on the actual changes made.
 
 ## Project Overview
 
-A single-file bash script (`gh-dep-scanner.sh`) that scans GitHub repositories (org or personal) to find which repos use packages in an affected version range. Supports Composer (PHP) and Node (JavaScript) dependencies.
+A bash script (`gh-dep-scanner.sh` with its modules in `lib/`) that scans GitHub repositories (org or personal) to find which repos use packages in an affected version range. Supports Composer (PHP) and Node (JavaScript) dependencies.
 
 ## Requirements
 
@@ -49,18 +49,19 @@ A single-file bash script (`gh-dep-scanner.sh`) that scans GitHub repositories (
 
 ## Script Architecture
 
-The script is organized into sections marked by comment blocks:
+`gh-dep-scanner.sh` loads the modules in `lib/` (found next to the script's real path, also through symlinks), then runs `main`:
 
-1. **HELPER FUNCTIONS** - Color output utilities (`print_error`, `print_success`, etc.)
-2. **PREREQUISITES CHECK** - Verifies `gh` and `jq` are installed
-3. **ARGUMENT PARSING** - Options in the form `--option=value` only (see `--help`)
-4. **URL PARSING** - Extracts owner/org from various GitHub URL formats
-5. **REPOSITORY FETCHING** - REST repository list, updated from the cache by push and update time
-6. **DEPENDENCY FILE FETCHING** - Fetches the dependency files by commit (batched with GraphQL for the root files)
-7. **VERSION EXTRACTION** - Lists the packages of a dependency file (`jq`, `awk` for `yarn.lock`)
-8. **VERSION COMPARISON** - Parses constraints to major, minor, patch and checks the `--affected` ranges
-9. **MAIN SCANNING LOGIC** - Iterates repos and branches
-10. **OUTPUT** - Colored table output with summary
+1. **lib/config.sh** - Colors, defaults and the global state
+2. **lib/log.sh** - Log file, messages, progress line
+3. **lib/github.sh** - `gh` requests: cache, locks, retries
+4. **lib/rate-limit.sh** - Rate limit check, pacing and waits
+5. **lib/options.sh** - Help, prerequisites, options (`--option=value` only) and the GitHub URL
+6. **lib/repos.sh** - REST repository list, updated from the cache by push and update time
+7. **lib/branches.sh** - Branches with their status (ahead/behind the default branch)
+8. **lib/files.sh** - Dependency files by commit, file lists, GraphQL prefetch
+9. **lib/versions.sh** - Packages of a dependency file (`jq`, `awk` for `yarn.lock`), versions and `--affected`
+10. **lib/scan.sh** - Iterates repos and branches, records the result rows
+11. **lib/table.sh** - Column widths, result table and summary
 
 ## Key Functions
 
