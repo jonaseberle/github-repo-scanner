@@ -40,6 +40,17 @@ EXCLUDE_PATHS_GIVEN=0
 NODE_ENGINES_EXCLUDE_PATHS='(^|/)(node_modules|bower_components|jspm_packages|web_modules|vendor|\.yarn|\.pnpm-store)/'
 REPO_FILTER=""
 SHOW_VISIBILITY=0
+# --output-text, --output-md, --output-html, --output-pdf: the files for the
+# results, and their width in columns.
+OUTPUT_TEXT=""
+OUTPUT_MD=""
+OUTPUT_HTML=""
+OUTPUT_PDF=""
+REPORT_COLUMNS=160
+# 1 while print_results renders a copy for the files: no requests, no log line.
+REPORT_ONLY=0
+# The command line options, for the files.
+SCAN_ARGUMENTS=""
 # --hide-path: no path for a branch with only one found dependency file.
 HIDE_PATH=0
 # Set by hide_single_paths: no row has a path left.

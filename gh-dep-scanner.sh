@@ -52,6 +52,8 @@ source "$LIB_DIR/versions.sh"
 source "$LIB_DIR/scan.sh"
 # shellcheck source=lib/table.sh
 source "$LIB_DIR/table.sh"
+# shellcheck source=lib/output.sh
+source "$LIB_DIR/output.sh"
 
 main() {
     init_log
@@ -154,6 +156,7 @@ main() {
 
     # Print results
     print_results
+    write_outputs
 }
 
 # Run main function. "exit" on the same line: bash reads the script while it

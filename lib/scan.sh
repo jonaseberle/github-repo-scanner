@@ -14,6 +14,7 @@ on_scan_interrupt() {
     log WARN "Interrupted (Ctrl-C) in repo $SCAN_POSITION/$TOTAL_REPOS: printing the results so far."
     clear_progress
     print_results
+    write_outputs
     exit 130
 }
 

@@ -493,6 +493,40 @@ print_row() {
     done
 }
 
+# Set ORDERED_ROWS to the numbers of the shown rows, in the order of the
+# table: by group, then by URL, branch, path and package.
+ordered_rows() {
+    # Sort the rows by URL, branch, path and package. The index is the last field.
+    # The default branch first: "0" before its name, "1" before the others.
+    local sorted_rows
+    # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
+    sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do
+        first=1
+        if [[ "${RESULT_BRANCH_STATUS[$i]}" == "default" ]]; then
+            first=0
+        fi
+        echo "${RESULT_URLS[$i]} $first${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"
+    done | sort --ignore-case | awk '{ print $NF }')
+
+    # Group the rows: version found, package not found, no file, parse error.
+    # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
+    local wanted_status i first
+    ORDERED_ROWS=""
+    for wanted_status in found not_in_file no_file error; do
+        # See row_shown.
+        if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
+            continue
+        fi
+        for i in $sorted_rows; do
+            # FOUND has all rows with a version, affected by --affected or not.
+            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" || ( "$wanted_status" == "found" && "${RESULT_STATUS[$i]}" =~ ^(not_)?affected$|^unchecked$ ) ]]; then
+                ORDERED_ROWS+=" $i"
+            fi
+        done
+    done
+
+}
+
 print_results() {
     local dep_file_name no_file_group
     dep_file_name=$(dep_file_names)
@@ -512,36 +546,10 @@ print_results() {
 
     local has_results=0
 
-    # Sort the rows by URL, branch, path and package. The index is the last field.
-    # The default branch first: "0" before its name, "1" before the others.
-    local sorted_rows
-    # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
-    sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do
-        first=1
-        if [[ "${RESULT_BRANCH_STATUS[$i]}" == "default" ]]; then
-            first=0
-        fi
-        echo "${RESULT_URLS[$i]} $first${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"
-    done | sort --ignore-case | awk '{ print $NF }')
-
-    # Group the rows: version found, package not found, no file, parse error.
-    # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
-    local ordered_rows="" wanted_status i
-    for wanted_status in found not_in_file no_file error; do
-        # See row_shown.
-        if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
-            continue
-        fi
-        for i in $sorted_rows; do
-            # FOUND has all rows with a version, affected by --affected or not.
-            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" || ( "$wanted_status" == "found" && "${RESULT_STATUS[$i]}" =~ ^(not_)?affected$|^unchecked$ ) ]]; then
-                ordered_rows+=" $i"
-            fi
-        done
-    done
-
+    ordered_rows
+    local i
     local group="" row_group
-    for i in $ordered_rows; do
+    for i in $ORDERED_ROWS; do
         local status="${RESULT_STATUS[$i]}"
         local url="${RESULT_URLS[$i]}"
         local version="${RESULT_VERSIONS[$i]}"
@@ -670,14 +678,17 @@ print_results() {
         echo "  - Requests served from the cache: 0 of $requests"
     fi
     if [[ $OFFLINE -eq 0 ]]; then
-        check_rate_limit
+        # The copy for --html uses the state of the terminal output.
+        if [[ $REPORT_ONLY -eq 0 ]]; then
+            check_rate_limit
+        fi
         echo "  - $(rate_limit_summary)"
     fi
     local complete="complete"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         complete="NOT complete"
     fi
-    log INFO "Done ($complete): ${#RESULT_STATUS[@]} rows, $AFFECTED_COUNT affected, $FOUND_COUNT found, $NO_FILE_COUNT without file, $PARSE_ERROR_COUNT parse errors, $NOT_FOUND_COUNT without package; $cache_hits of $requests requests from the cache"
+    [[ $REPORT_ONLY -eq 1 ]] || log INFO "Done ($complete): ${#RESULT_STATUS[@]} rows, $AFFECTED_COUNT affected, $FOUND_COUNT found, $NO_FILE_COUNT without file, $PARSE_ERROR_COUNT parse errors, $NOT_FOUND_COUNT without package; $cache_hits of $requests requests from the cache"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         echo ""
         printf '%s\n' "${RED}${BOLD}Scanning NOT complete.${NC}"

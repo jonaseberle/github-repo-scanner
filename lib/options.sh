@@ -100,6 +100,14 @@ ${BOLD}OPTIONS:${NC}
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
 
+    --output-text=<file>, --output-md=<file>, --output-html=<file>,
+    --output-pdf=<file>
+                        Optional: also write the results to a file, 160
+                        columns wide: plain text, Markdown tables, HTML (white
+                        page with the colors) or PDF (that HTML, printed by a
+                        headless Chromium or Google Chrome; set CHROMIUM=<path>
+                        for another one)
+
     --offline           Optional: use the cached repository list and do not
                         check for pushes. Once cached, a scan needs no network.
 
@@ -176,6 +184,24 @@ check_prerequisites() {
 }
 
 parse_args() {
+    # For the files: the options, a value with special characters in single
+    # quotes as typed in a shell: --packages='^a$'.
+    local argument name value
+    SCAN_ARGUMENTS=""
+    for argument in "$@"; do
+        # The files themselves say nothing about the scan.
+        if [[ "$argument" == --output-* ]]; then
+            continue
+        fi
+        if [[ ! "$argument" =~ ^[A-Za-z0-9_./:=@%+,-]*$ ]]; then
+            name="" value="$argument"
+            if [[ "$argument" == --*=* ]]; then
+                name="${argument%%=*}=" value="${argument#*=}"
+            fi
+            argument="$name'${value//\'/\'\\\'\'}'"
+        fi
+        SCAN_ARGUMENTS+="${SCAN_ARGUMENTS:+ }$argument"
+    done
     # Values only in the form --option=value: personal preference.
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -240,6 +266,18 @@ parse_args() {
             --show-visibility)
                 SHOW_VISIBILITY=1
                 ;;
+            --output-text=*)
+                OUTPUT_TEXT="${1#*=}"
+                ;;
+            --output-md=*)
+                OUTPUT_MD="${1#*=}"
+                ;;
+            --output-html=*)
+                OUTPUT_HTML="${1#*=}"
+                ;;
+            --output-pdf=*)
+                OUTPUT_PDF="${1#*=}"
+                ;;
             --hide-path)
                 HIDE_PATH=1
                 ;;
@@ -266,7 +304,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths)
+            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths|--output-text|--output-md|--output-html|--output-pdf)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;
