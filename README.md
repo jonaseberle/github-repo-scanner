@@ -20,6 +20,7 @@ This script fills that gap.
 - Supports **Composer** (PHP) and **Node** (JavaScript) dependencies
 - Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type=composerJson`)
 - Reads the installed Node version from `package-lock.json` or `yarn.lock` (or the constraint from `package.json` with `--type=nodeJson`)
+- Reads the Node versions of a project (`engines` in `package.json`, `.nvmrc`, `.node-version`) with `--type=nodeEngines`
 - Rate limiting to avoid GitHub API limits
 - Caches every GitHub request in `./var/cache`, so a second scan needs no network
 - Colored output with progress indicator
@@ -53,8 +54,9 @@ gh auth login
 Options (values only in the form --option=value):
   --url=<url>         GitHub URL (org or personal repos page, or one repo)
   --type=<type>       Dependency type: "composer" (composer.lock), "composerJson"
-                      (composer.json), "node" (package-lock.json or yarn.lock)
-                      or "nodeJson" (package.json)
+                      (composer.json), "node" (package-lock.json or yarn.lock),
+                      "nodeJson" (package.json) or "nodeEngines" ("engines" in
+                      package.json, .nvmrc, .node-version)
   --packages[=regex]  Packages whose name matches this extended regular
                       expression, e.g. '^livewire/livewire$'; without a regex,
                       all packages
@@ -212,6 +214,17 @@ Options (values only in the form --option=value):
   --type=nodeJson \
   --packages='^react$' \
   --affected='<18'
+```
+
+### Find projects that still allow Node < 20
+
+```bash
+./gh-dep-scanner.sh \
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=nodeEngines \
+  --packages='^node$' \
+  --affected='<20' \
+  --alternativePaths
 ```
 
 ### Show the visibility of each repository
