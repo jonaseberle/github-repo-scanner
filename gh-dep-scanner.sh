@@ -6,7 +6,7 @@
 # that use a package in an affected version range.
 #
 # Requirements: gh (GitHub CLI), jq
-# Usage: ./gh-dep-scanner.sh [options] or run interactively
+# Usage: ./gh-dep-scanner.sh --url=<url> --type=<type> --packages[=regex] [options]
 #===============================================================================
 
 set -o errexit -o nounset -o pipefail -o noclobber
@@ -141,8 +141,7 @@ Scans all repositories in a GitHub organization or personal account (or a
 single repository) to find repos that use a package in an affected version range.
 
 ${BOLD}USAGE:${NC}
-    ./gh-dep-scanner.sh [OPTIONS]
-    ./gh-dep-scanner.sh                    # Interactive mode
+    ./gh-dep-scanner.sh --url=<url> --type=<type> --packages[=regex] [OPTIONS]
 
 ${BOLD}OPTIONS:${NC}
     Options with a value take the form --option=value.
@@ -236,9 +235,6 @@ ${BOLD}OPTIONS:${NC}
     -h, --help          Show this help message
 
 ${BOLD}EXAMPLES:${NC}
-    # Interactive mode
-    ./gh-dep-scanner.sh
-
     # Find repos with livewire < 4 in an organization
     ./gh-dep-scanner.sh --url="https://github.com/orgs/YOUR_ORG/repositories" \\
                         --type=composer \\
@@ -933,79 +929,6 @@ parse_args() {
         esac
         shift
     done
-}
-
-#===============================================================================
-# INTERACTIVE MODE
-#===============================================================================
-
-interactive_mode() {
-    printf '%s\n' "${BOLD}GitHub Dependency Scanner - Interactive Mode${NC}"
-    echo "=============================================="
-    echo ""
-
-    # URL
-    if [[ -z "$URL" ]]; then
-        printf '%s\n' "${CYAN}Enter GitHub URL:${NC}"
-        echo "  Examples:"
-        echo "    https://github.com/orgs/YOUR_ORG/repositories"
-        echo "    https://github.com/USERNAME?tab=repositories"
-        echo "    https://github.com/USERNAME"
-        echo "    https://github.com/OWNER/REPO"
-        read -r -p "> " URL
-        echo ""
-    fi
-
-    # Type
-    if [[ -z "$TYPE" ]]; then
-        printf '%s\n' "${CYAN}Select dependency type:${NC}"
-        echo "  1) composer (PHP - composer.lock, installed version)"
-        echo "  2) node (JavaScript - package-lock.json or yarn.lock, installed version)"
-        echo "  3) composerJson (PHP - composer.json, version constraint)"
-        echo "  4) nodeJson (JavaScript - package.json, version constraint)"
-        read -r -p "> " type_choice
-        case $type_choice in
-            1|composer) TYPE="composer" ;;
-            2|node) TYPE="node" ;;
-            3|composerJson) TYPE="composerJson" ;;
-            4|nodeJson) TYPE="nodeJson" ;;
-            *)
-                print_error "Invalid choice. Please enter 1, 2, 3, 4, 'composer', 'node', 'composerJson', or 'nodeJson'."
-                exit 1
-                ;;
-        esac
-        echo ""
-    fi
-
-    # Packages
-    if [[ -z "$PACKAGES" ]]; then
-        printf '%s\n' "${CYAN}Enter a regular expression for the package names (press Enter for all packages):${NC}"
-        if [[ "$TYPE" != node* ]]; then
-            echo "  Example: ^livewire/livewire\$, ^typo3/cms-"
-        else
-            echo "  Example: ^react\$, ^@babel/"
-        fi
-        read -r -p "> " PACKAGES
-        echo ""
-        if [[ -z "$PACKAGES" ]]; then
-            PACKAGES="."
-        fi
-    fi
-
-    # Affected versions
-    if [[ -z "$AFFECTED" ]]; then
-        printf '%s\n' "${CYAN}Enter the affected version ranges (press Enter to show all found packages):${NC}"
-        echo "  Example: <4, >=13.0.0,<13.3.5|<6.4.5"
-        read -r -p "> " AFFECTED
-        echo ""
-    fi
-
-    # Branch (optional)
-    if [[ -z "$BRANCH" && -z "$BRANCHES" ]]; then
-        printf '%s\n' "${CYAN}Enter branch name (press Enter for default branch):${NC}"
-        read -r -p "> " BRANCH
-        echo ""
-    fi
 }
 
 #===============================================================================
@@ -2792,7 +2715,11 @@ main() {
     init_log
     log INFO "Start: $0 $*"
 
-    # Parse command line arguments
+    # Without arguments: the usage.
+    if [[ $# -eq 0 ]]; then
+        show_help
+        exit 1
+    fi
     parse_args "$@"
 
     REQUEST_LOG=$(mktemp)
@@ -2800,19 +2727,27 @@ main() {
     trap 'rm -f "$REQUEST_LOG"; remove_temp_files; remove_own_locks' EXIT
     remove_temp_files
 
+    local missing=0
+    if [[ -z "$URL" ]]; then
+        print_error "--url is required, e.g. --url=https://github.com/orgs/ORG/repositories."
+        missing=1
+    fi
+    if [[ -z "$TYPE" ]]; then
+        print_error "--type is required: composer, composerJson, node or nodeJson."
+        missing=1
+    fi
+    if [[ -z "$PACKAGES" ]]; then
+        print_error "--packages is required: --packages=<regex>, or --packages for all packages."
+        missing=1
+    fi
+    if [[ $missing -eq 1 ]]; then
+        echo "Use --help for usage information."
+        exit 1
+    fi
+
     # Check prerequisites
     check_prerequisites
 
-    # If required arguments are missing, enter interactive mode
-    if [[ -z "$URL" || -z "$TYPE" || -z "$PACKAGES" ]]; then
-        interactive_mode
-    fi
-
-    # Validate inputs
-    if [[ -z "$URL" ]]; then
-        print_error "GitHub URL is required."
-        exit 1
-    fi
 
     if [[ "$TYPE" != "composer" && "$TYPE" != "composerJson" && "$TYPE" != "node" && "$TYPE" != "nodeJson" ]]; then
         print_error "Type must be 'composer', 'composerJson', 'node' or 'nodeJson'."
