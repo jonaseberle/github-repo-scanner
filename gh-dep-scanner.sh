@@ -44,6 +44,8 @@ source "$LIB_DIR/repos.sh"
 source "$LIB_DIR/branches.sh"
 # shellcheck source=lib/files.sh
 source "$LIB_DIR/files.sh"
+# shellcheck source=lib/ranges.sh
+source "$LIB_DIR/ranges.sh"
 # shellcheck source=lib/versions.sh
 source "$LIB_DIR/versions.sh"
 # shellcheck source=lib/scan.sh

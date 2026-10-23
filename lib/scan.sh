@@ -42,11 +42,14 @@ record_result() {
         if [[ -z "$AFFECTED" ]]; then
             status="found"
             FOUND_COUNT=$((FOUND_COUNT + 1))
-        elif is_affected "$version_str"; then
-            status="affected"
-            AFFECTED_COUNT=$((AFFECTED_COUNT + 1))
         else
-            status="not_affected"
+            local affected=0
+            is_affected "$version_str" || affected=$?
+            case $affected in
+                0) status="affected"; AFFECTED_COUNT=$((AFFECTED_COUNT + 1)) ;;
+                1) status="not_affected" ;;
+                *) status="unchecked"; UNCHECKED_COUNT=$((UNCHECKED_COUNT + 1)) ;;
+            esac
         fi
     fi
 

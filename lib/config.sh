@@ -75,15 +75,8 @@ REPO=""
 TYPE=""
 PACKAGES=""
 AFFECTED=""
-# --affected, parsed: per condition the group number, the operator and the
-# version (major, minor, patch).
-declare -a RANGE_GROUPS=()
-declare -a RANGE_OPERATORS=()
-declare -a RANGE_MAJORS=()
-declare -a RANGE_MINORS=()
-declare -a RANGE_PATCHES=()
-# Set by parse_version.
-declare -a VERSION=()
+# The syntax of the version ranges: "composer" or "npm", see version_dialect.
+VERSION_DIALECT="npm"
 
 # Results arrays
 declare -a RESULT_URLS=()
@@ -105,6 +98,8 @@ declare -a RESULT_STATUS=()
 # Counters
 TOTAL_REPOS=0
 AFFECTED_COUNT=0
+# Versions that are no range, with --affected (e.g. "dev-main").
+UNCHECKED_COUNT=0
 FOUND_COUNT=0
 NO_FILE_COUNT=0
 PARSE_ERROR_COUNT=0

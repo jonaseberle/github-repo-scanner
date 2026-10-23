@@ -75,109 +75,32 @@ matching_packages() {
     done <<< "$1"
 }
 
-# Set VERSION to the version of a constraint: (major minor patch). A missing
-# part is 0. A variable, not output: no subshell for each of many rows.
-parse_version() {
-    local cleaned="$1"
-    VERSION=(0 0 0)
-    if [[ "$cleaned" == "*" || "$cleaned" == "latest" || "$cleaned" == dev-* ]]; then
-        return 0
-    fi
-
-    # The first of OR constraints ("^2.0|^3.0", "^2.0 || ^3.0") and of
-    # space-separated ones (">=2.0 <4.0").
-    cleaned="${cleaned%%|*}"
-    cleaned="${cleaned%% *}"
-
-    # Quote "~": unquoted, bash expands it to $HOME and nothing is removed.
-    cleaned="${cleaned#^}"
-    cleaned="${cleaned#\~}"
-    cleaned="${cleaned#>=}"
-    cleaned="${cleaned#>}"
-    cleaned="${cleaned#<=}"
-    cleaned="${cleaned#<}"
-    cleaned="${cleaned#=}"
-    cleaned="${cleaned#v}"
-
-    # "3.*" gives 3 0 0.
-    if [[ "$cleaned" =~ ^([0-9]+)(\.([0-9]+))?(\.([0-9]+))? ]]; then
-        VERSION=("${BASH_REMATCH[1]}" "${BASH_REMATCH[3]:-0}" "${BASH_REMATCH[5]:-0}")
-    fi
+# The syntax of the version ranges of TYPE: "composer" or "npm".
+version_dialect() {
+    case "$TYPE" in
+        composer|composerJson) echo "composer" ;;
+        *) echo "npm" ;;
+    esac
 }
 
-# Parse --affected into the RANGE_* arrays.
+# Parse --affected into AFFECTED_*: the syntax of security advisories (e.g.
+# on packagist.org), "|" between alternatives, "," between conditions.
 # Stop on an invalid range.
 parse_affected() {
-    local -a groups conditions
-    local group condition number=0
-    IFS='|' read -r -a groups <<< "$AFFECTED"
-    for group in ${groups[@]+"${groups[@]}"}; do
-        number=$((number + 1))
-        conditions=()
-        IFS=',' read -r -a conditions <<< "$group"
-        if [[ ${#conditions[@]} -eq 0 ]]; then
-            print_error "Invalid --affected: an empty range in '$AFFECTED'."
-            exit 1
-        fi
-        for condition in "${conditions[@]}"; do
-            condition="${condition// /}"
-            if [[ ! "$condition" =~ ^(\>=|\<=|!=|==|\>|\<|=)?v?([0-9]+(\.[0-9]+)*)$ ]]; then
-                print_error "Invalid --affected: '$condition' (use e.g. >=1.2.3 or <2)."
-                exit 1
-            fi
-            RANGE_GROUPS+=("$number")
-            RANGE_OPERATORS+=("${BASH_REMATCH[1]:-=}")
-            # After the operator: parse_version changes BASH_REMATCH.
-            parse_version "${BASH_REMATCH[2]}"
-            RANGE_MAJORS+=("${VERSION[0]}")
-            RANGE_MINORS+=("${VERSION[1]}")
-            RANGE_PATCHES+=("${VERSION[2]}")
-        done
-    done
+    VERSION_DIALECT=$(version_dialect)
+    if [[ -z "$AFFECTED" ]]; then
+        return 0
+    fi
+    if ! range_parse "$AFFECTED" composer; then
+        print_error "Invalid --affected: '$AFFECTED' (use e.g. '>=1.2.3,<2|<1.0.5')."
+        exit 1
+    fi
+    range_keep affected
 }
 
-# True if version (constraint) $1 is in one of the --affected ranges:
-# all conditions of at least one group hold.
+# Return 0 if the version or constraint $1 overlaps the --affected ranges,
+# 1 if not, 2 if it is no version range (e.g. "dev-main", "latest").
 is_affected() {
-    local -a have wanted
-    parse_version "$1"
-    have=("${VERSION[@]}")
-
-    local i part comparison group=0 group_holds=0
-    for i in "${!RANGE_OPERATORS[@]}"; do
-        if [[ ${RANGE_GROUPS[$i]} -ne $group ]]; then
-            if [[ $group -gt 0 && $group_holds -eq 1 ]]; then
-                return 0
-            fi
-            group=${RANGE_GROUPS[$i]}
-            group_holds=1
-        fi
-        if [[ $group_holds -eq 0 ]]; then
-            continue
-        fi
-
-        # Compare major, then minor, then patch. "10#": a part like "08" is not octal.
-        wanted=("${RANGE_MAJORS[$i]}" "${RANGE_MINORS[$i]}" "${RANGE_PATCHES[$i]}")
-        comparison=0
-        for part in 0 1 2; do
-            if (( 10#${have[$part]} < 10#${wanted[$part]} )); then
-                comparison=-1
-                break
-            fi
-            if (( 10#${have[$part]} > 10#${wanted[$part]} )); then
-                comparison=1
-                break
-            fi
-        done
-
-        case "${RANGE_OPERATORS[$i]}" in
-            ">=") [[ $comparison -ge 0 ]] || group_holds=0 ;;
-            ">") [[ $comparison -gt 0 ]] || group_holds=0 ;;
-            "<=") [[ $comparison -le 0 ]] || group_holds=0 ;;
-            "<") [[ $comparison -lt 0 ]] || group_holds=0 ;;
-            "!=") [[ $comparison -ne 0 ]] || group_holds=0 ;;
-            *) [[ $comparison -eq 0 ]] || group_holds=0 ;;
-        esac
-    done
-    [[ $group -gt 0 && $group_holds -eq 1 ]]
+    range_parse "$1" "$VERSION_DIALECT" || return 2
+    range_overlaps affected
 }

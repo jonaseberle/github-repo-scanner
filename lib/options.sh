@@ -38,6 +38,8 @@ ${BOLD}OPTIONS:${NC}
                         ranges, in the form of security advisories (e.g. on
                         packagist.org): "|" separates alternatives, "," joins
                         conditions. Operators: >=, >, <=, <, =, !=.
+                        A constraint (e.g. ^3.2) counts if it has a version
+                        in the ranges. "?": no version range (e.g. dev-main).
                         Example: --affected='>=13.0.0,<13.3.5|<6.4.5'
                         Default: show all found packages
 

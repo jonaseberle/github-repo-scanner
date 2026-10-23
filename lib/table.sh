@@ -482,7 +482,12 @@ print_row() {
             row+=" $version_color${version_lines[$i]:-}$NC"
         fi
         if [[ $i -eq 0 && -n "${mark:-}" ]]; then
-            row+=" $COLOR_AFFECTED$mark$NC"
+            # "*": affected, "?": not checked (no version range).
+            if [[ "$mark" == "?" ]]; then
+                row+=" $YELLOW$mark$NC"
+            else
+                row+=" $COLOR_AFFECTED$mark$NC"
+            fi
         fi
         printf "%s\n" "$row"
     done
@@ -529,7 +534,7 @@ print_results() {
         fi
         for i in $sorted_rows; do
             # FOUND has all rows with a version, affected by --affected or not.
-            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" || ( "$wanted_status" == "found" && "${RESULT_STATUS[$i]}" == *affected ) ]]; then
+            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" || ( "$wanted_status" == "found" && "${RESULT_STATUS[$i]}" =~ ^(not_)?affected$|^unchecked$ ) ]]; then
                 ordered_rows+=" $i"
             fi
         done
@@ -548,7 +553,7 @@ print_results() {
         local package="${RESULT_PACKAGES[$i]}"
 
         case "$status" in
-            affected | not_affected | found) row_group="FOUND" ;;
+            affected | not_affected | unchecked | found) row_group="FOUND" ;;
             not_in_file) row_group="PACKAGE NOT FOUND" ;;
             no_file) row_group="$no_file_group" ;;
             *) row_group="PARSE ERROR" ;;
@@ -566,6 +571,9 @@ print_results() {
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
             print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$lock_conflict"
+        elif [[ "$status" == "unchecked" ]]; then
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$lock_conflict"
+            has_results=1
         elif [[ "$status" == "found" ]]; then
             print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$lock_conflict"
             has_results=1
@@ -625,6 +633,9 @@ print_results() {
     # A file can give several rows: count packages, not repositories.
     if [[ -n "$AFFECTED" ]]; then
         printf '%s\n' "  - Packages affected: ${RED}$AFFECTED_COUNT${NC}"
+        if [[ $UNCHECKED_COUNT -gt 0 ]]; then
+            printf '%s\n' "  - Versions without a version range, not checked (\"?\"): ${YELLOW}$UNCHECKED_COUNT${NC}"
+        fi
     else
         printf '%s\n' "  - Packages found: ${GREEN}$FOUND_COUNT${NC}"
     fi
