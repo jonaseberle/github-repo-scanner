@@ -100,13 +100,15 @@ ${BOLD}OPTIONS:${NC}
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
 
-    --output-text=<file>, --output-md=<file>, --output-html=<file>,
-    --output-pdf=<file>
+    --output-text[=file], --output-md[=file], --output-html[=file],
+    --output-pdf[=file]
                         Optional: also write the results to a file, 160
                         columns wide: plain text, Markdown tables, HTML (white
                         page with the colors) or PDF (that HTML, printed by a
                         headless Chromium or Google Chrome; set CHROMIUM=<path>
                         for another one). A relative path is below ./output.
+                        Without a file: <owner>_<packages>.<txt|md|html|pdf>,
+                        e.g. ./output/dmind-gmbh_typo3-cms-core.pdf
 
     --offline           Optional: use the cached repository list and do not
                         check for pushes. Once cached, a scan needs no network.
@@ -205,6 +207,19 @@ parse_args() {
     # Values only in the form --option=value: personal preference.
     while [[ $# -gt 0 ]]; do
         case $1 in
+            # Without a file name: the default of write_outputs.
+            --output-text | --output-text=)
+                OUTPUT_TEXT="$OUTPUT_DEFAULT"
+                ;;
+            --output-md | --output-md=)
+                OUTPUT_MD="$OUTPUT_DEFAULT"
+                ;;
+            --output-html | --output-html=)
+                OUTPUT_HTML="$OUTPUT_DEFAULT"
+                ;;
+            --output-pdf | --output-pdf=)
+                OUTPUT_PDF="$OUTPUT_DEFAULT"
+                ;;
             --*=)
                 print_error "${1%=} needs a value: use $1<value>."
                 exit 1
@@ -304,7 +319,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths|--output-text|--output-md|--output-html|--output-pdf)
+            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;

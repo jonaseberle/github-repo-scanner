@@ -9,10 +9,10 @@ write_outputs() {
     if [[ -z "$OUTPUT_TEXT$OUTPUT_MD$OUTPUT_HTML$OUTPUT_PDF" ]]; then
         return 0
     fi
-    output_path OUTPUT_TEXT
-    output_path OUTPUT_MD
-    output_path OUTPUT_HTML
-    output_path OUTPUT_PDF
+    output_path OUTPUT_TEXT txt
+    output_path OUTPUT_MD md
+    output_path OUTPUT_HTML html
+    output_path OUTPUT_PDF pdf
     local body
     body=$(TERM_COLUMNS=$REPORT_COLUMNS REPORT_ONLY=1 print_results)
     if [[ -n "$OUTPUT_TEXT" ]]; then
@@ -36,11 +36,21 @@ write_outputs() {
 }
 
 # Put the file of the variable $1 below OUTPUT_DIR if its path is relative,
-# and create its directory. An absolute path stays.
+# and create its directory. An absolute path stays. Without a file name, the
+# name comes from the owner (and repository) and --packages, with the
+# extension $2: "^typo3/cms-core$" gives dmind-gmbh_typo3-cms-core.pdf.
 output_path() {
     local path="${!1}"
     if [[ -z "$path" ]]; then
         return 0
+    fi
+    if [[ "$path" == "$OUTPUT_DEFAULT" ]]; then
+        local packages="$PACKAGES"
+        if [[ "$packages" == "." ]]; then
+            packages="all-packages"
+        fi
+        path=$(printf '%s_%s' "$OWNER${REPO:+_$REPO}" "$packages" | awk '{
+            gsub(/[^A-Za-z0-9._-]+/, "-"); gsub(/-+/, "-"); gsub(/^[-.]+|-+$/, ""); gsub(/-_|_-/, "_"); print }').$2
     fi
     if [[ "$path" != /* ]]; then
         path="$OUTPUT_DIR/$path"
