@@ -87,10 +87,11 @@ Options (values only in the form --option=value):
                       extended regular expression (one row per dependency
                       file); without a regex, all directories
   --filename-match=<regex>
-                      Optional: a fallback for a branch without a version: if
-                      a file path matches this extended regular expression,
-                      one row in FILENAME MATCH replaces its rows; works
-                      without --packages too, e.g. --filename-match='typo3conf/'
+                      Optional: a fallback for a repository without a version
+                      in any scanned branch: if a file path matches this
+                      extended regular expression, one row in FILENAME MATCH
+                      replaces the rows of a branch; works without
+                      --packages too, e.g. --filename-match='typo3conf/'
   --excludePaths=<regex>
                       Optional, with --alternativePaths: do not check the
                       directories that match this extended regular
@@ -343,7 +344,7 @@ Summary:
 
 ### Output Legend
 
-Rows are grouped: FOUND (the package is in the dependency file), FILENAME MATCH (no version, but a file matches `--filename-match`), PACKAGE NOT FOUND (the package is not in it), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
+Rows are grouped: FOUND (the package is in the dependency file), FILENAME MATCH (no version in the repository, but a file matches `--filename-match`), PACKAGE NOT FOUND (the package is not in it), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
 
 In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green. A version that is no version range (e.g. `dev-main`) ends with a yellow `?`.
 

@@ -88,10 +88,10 @@ ${BOLD}OPTIONS:${NC}
                         Example: --alternativePaths='^(webroot|packages/[^/]+)$'
 
     --filename-match=<regex>
-                        Optional: a fallback for a branch without a version:
-                        if a file path matches this extended regular
-                        expression, the branch gets one row in the group
-                        FILENAME MATCH instead of its rows without a version.
+                        Optional: a fallback for a repository without a
+                        version in any scanned branch: if a file path matches
+                        this extended regular expression, a branch gets one
+                        row in the group FILENAME MATCH instead of its rows.
                         Example: --filename-match='typo3conf/' finds TYPO3
                         projects without composer.lock. Without --packages
                         (and --type), only the file names are checked.
