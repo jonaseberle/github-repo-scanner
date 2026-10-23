@@ -101,10 +101,14 @@ Options (values only in the form --option=value):
   --show-visibility   Optional: add a column with the repo visibility
   --offline           Optional: use the cached repository list and do not check
                       for pushes (a cached scan then needs no network)
+  --cache-repo-list-max-age=<minutes>
+                      Optional: use the cached repository list without a check
+                      for changes (3 requests) if the last check is younger
+                      than this (default: 30; 0: always check)
   --no-cache          Optional: do not read the cache in ./var/cache (new
                       responses are still written to it)
   -v, --verbose       Print each command before it runs (set -x)
-  --help              Show help message
+  -h, --help          Show help message
 ```
 
 ## Examples
@@ -267,7 +271,7 @@ var/cache/
 - Files are cached by commit. A commit does not change, so these entries do not get old.
 - A file that does not exist is cached too, with the suffix `.404`.
 - Other errors (rate limit, authentication, network) are not cached.
-- Each scan updates the repository list (a full list once in 24 hours, else only the repositories with new pushes) and deletes the entries of a repository that are older than its last push, except the files by commit. With `--offline`, a cached scan uses only local data.
+- Each scan updates the repository list (a full list once in 24 hours, else only the repositories with new pushes) and deletes the entries of a repository that are older than its last push, except the files by commit. A list checked less than 30 minutes ago is used without a check (`--cache-repo-list-max-age`). With `--offline`, a cached scan uses only local data.
 - To fetch some requests again, delete their entries, for example:
   - `rm -r var/cache/api/repos/OWNER/REPO/branches` to check the branches again
   - `rm -r var/cache/api/repos/OWNER/REPO` to scan one repository again
