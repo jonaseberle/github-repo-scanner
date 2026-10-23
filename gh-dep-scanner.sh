@@ -2343,26 +2343,34 @@ fit_columns() {
             for (a = 1; a <= nu; a++) for (b = 1; b <= nb; b++) for (c = 1; c <= np; c++) {
                 u = CU[a]; w = CB[b]; p = CP[c]
                 rest = available - u - w - p
-                k = max_package; v = max_version
-                if (k + v > rest) {
-                    k = rest - v
-                    if (k < min_package) { k = min_package; v = rest - k }
-                    if (v < min_version) continue
-                }
-                total = 0
-                for (r = 1; r <= rows && (best < 0 || total < best); r++) {
-                    cells = text_lines(VERSION[r], v)
-                    n = path_lines(PACKAGE[r], k); if (n > cells) cells = n
-                    if (show_path) { n = path_lines(PATH[r], p); if (n > cells) cells = n }
-                    extra = URL[r] > u
-                    # In the PATH column of a row without a path, see print_row.
-                    if (show_branch && BRANCH[r] > w && !(show_path && PATH[r] == "" && BRANCH[r] <= w + 1 + p)) {
-                        # On the line of the URL if it fits there, else on a line of its own.
-                        extra = (!extra && u + 1 + BRANCH[r] <= columns - 1) ? 1 : 2
+                # Shrink the package first, or the version first.
+                for (m = 1; m <= 2; m++) {
+                    k = max_package; v = max_version
+                    if (k + v <= rest) {
+                        if (m == 2) continue
+                    } else if (m == 1) {
+                        k = rest - v
+                        if (k < min_package) { k = min_package; v = rest - k }
+                    } else {
+                        v = rest - k
+                        if (v < min_version) { v = min_version; k = rest - v }
                     }
-                    total += WEIGHT[r] * (extra + cells)
+                    if (k < min_package || v < min_version) continue
+                    total = 0
+                    for (r = 1; r <= rows && (best < 0 || total < best); r++) {
+                        cells = text_lines(VERSION[r], v)
+                        n = path_lines(PACKAGE[r], k); if (n > cells) cells = n
+                        if (show_path) { n = path_lines(PATH[r], p); if (n > cells) cells = n }
+                        extra = URL[r] > u
+                        # In the PATH column of a row without a path, see print_row.
+                        if (show_branch && BRANCH[r] > w && !(show_path && PATH[r] == "" && BRANCH[r] <= w + 1 + p)) {
+                            # On the line of the URL if it fits there, else on a line of its own.
+                            extra = (!extra && u + 1 + BRANCH[r] <= columns - 1) ? 1 : 2
+                        }
+                        total += WEIGHT[r] * (extra + cells)
+                    }
+                    if (best < 0 || total < best) { best = total; result = u " " w " " p " " k " " v }
                 }
-                if (best < 0 || total < best) { best = total; result = u " " w " " p " " k " " v }
             }
             if (best < 0) result = min_url " " min_branch " " min_path " " min_package " " min_version
             print result
