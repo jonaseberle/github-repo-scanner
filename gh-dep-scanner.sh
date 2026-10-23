@@ -2105,9 +2105,9 @@ BRANCH_COLUMN_WIDTH=6
 PACKAGE_COLUMN_WIDTH=7
 
 # Fit the columns to the longest values and to the terminal width.
-# If the row is too wide, shrink in this order: branch, path and package
-# (they wrap after a "/"), then the version (it wraps at spaces), then the URL (it gets
-# its own line, because a URL never wraps).
+# If the row is too wide, shrink in this order: the branch (a longer one gets
+# its own line), path and package (they wrap after a "/"), then the version (it
+# wraps at spaces), then the URL (it gets its own line, because a URL never wraps).
 set_column_widths() {
     local i url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
     for i in "${!RESULT_STATUS[@]}"; do
@@ -2198,26 +2198,50 @@ show_path_column() {
 
 # Arguments: color, URL, branch, path, package, version, visibility, and
 # optionally the color of the version and a mark for the end of the row.
-# A branch, path, package or version that is too wide wraps and stays in its column.
+# A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
+# A branch does not wrap either: a branch that is too wide gets a line of its
+# own, from the branch column on, or further left if the line is too short.
 print_row() {
+    # The URL has the color of the group, the other cells the color of their column.
+    # The header (bold) and the dashes (no color) have one color for all cells.
+    local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
+    local version_color="${8:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY"
+    if [[ -z "$1" || "$1" == "$BOLD" ]]; then
+        branch_color="$1" path_color="$1" package_color="$1" version_color="$1" visibility_color="$1"
+    fi
+
     local -a url_lines=("$2") branch_lines=() path_lines=() package_lines=() version_lines=()
-    local line
+    local line cell
     if [[ ${#2} -gt $URL_COLUMN_WIDTH ]]; then
         printf "%s%s%s\n" "$1" "$2" "$NC"
         url_lines=("")
     fi
-    # A cell that fits needs no wrap: no subshell for most rows.
-    if ! show_branch_column; then
-        :
-    elif [[ ${#3} -le $BRANCH_COLUMN_WIDTH ]]; then
+    if show_branch_column && [[ ${#3} -gt $BRANCH_COLUMN_WIDTH ]]; then
+        # Keep the last column free, as in set_column_widths.
+        local start=$((URL_COLUMN_WIDTH + 1)) latest=$((TERM_COLUMNS - 1 - ${#3}))
+        if [[ -n "${url_lines[0]}" && $start -le $latest ]]; then
+            printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "$2"
+            printf "%s%s%s %s%s%s\n" "$1" "$cell" "$NC" "$branch_color" "$3" "$NC"
+        else
+            if [[ -n "${url_lines[0]}" ]]; then
+                printf "%s%s%s\n" "$1" "$2" "$NC"
+            fi
+            if [[ $start -gt $latest ]]; then
+                start=$latest
+            fi
+            if [[ $start -lt 0 ]]; then
+                start=0
+            fi
+            printf "%*s%s%s%s\n" "$start" "" "$branch_color" "$3" "$NC"
+        fi
+        url_lines=("")
+        branch_lines=("")
+    elif show_branch_column; then
         branch_lines=("$3")
-    else
-        while IFS= read -r line; do
-            branch_lines+=("$line")
-        done < <(wrap_path "$BRANCH_COLUMN_WIDTH" "$3")
     fi
+    # A cell that fits needs no wrap: no subshell for most rows.
     if ! show_path_column; then
         :
     elif [[ ${#4} -le $PATH_COLUMN_WIDTH ]]; then
@@ -2256,16 +2280,8 @@ print_row() {
         count=${#version_lines[@]}
     fi
 
-    # The URL has the color of the group, the other cells the color of their column.
-    # The header (bold) and the dashes (no color) have one color for all cells.
-    local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
-    local version_color="${8:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY"
-    if [[ -z "$1" || "$1" == "$BOLD" ]]; then
-        branch_color="$1" path_color="$1" package_color="$1" version_color="$1" visibility_color="$1"
-    fi
-
     # Pad first, then color: the color codes have no width.
-    local i row cell
+    local i row
     for ((i = 0; i < count; i++)); do
         printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
         row="$1$cell$NC"
