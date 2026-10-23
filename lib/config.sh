@@ -31,6 +31,8 @@ HIDE_MERGED=0
 HIDE_UNKNOWN=0
 HIDE_ABSENT=0
 ALTERNATIVE_PATHS=""
+# --filename-match: a fallback for a branch without a version (FILENAME MATCH).
+FILENAME_MATCH=""
 # --excludePaths: directories that --alternativePaths does not check.
 EXCLUDE_PATHS=""
 # 1 if --excludePaths was given: then nodeEngines does not set its default.
@@ -126,6 +128,8 @@ UNCHECKED_COUNT=0
 FOUND_COUNT=0
 NO_FILE_COUNT=0
 PARSE_ERROR_COUNT=0
+# Branches without a version whose file names match --filename-match.
+FILENAME_MATCH_COUNT=0
 NOT_FOUND_COUNT=0
 BRANCHES_SCANNED=0
 NO_BRANCH_COUNT=0

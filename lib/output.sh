@@ -117,6 +117,7 @@ write_markdown() {
     for i in $ORDERED_ROWS; do
         case "${RESULT_STATUS[$i]}" in
             affected | not_affected | unchecked | found) row_group="Found" ;;
+            filename_match) row_group="File name match ($(markdown_cell "$FILENAME_MATCH"))" ;;
             not_in_file) row_group="Package not found" ;;
             no_file) row_group="Version file not found (${dep_file_name// /, })" ;;
             *) row_group="Parse error" ;;

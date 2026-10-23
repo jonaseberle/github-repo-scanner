@@ -20,7 +20,8 @@ on_scan_interrupt() {
 
 # Classify a package version and add a result row.
 # Arguments: URL, branch, path, visibility, package, and the version or
-# NOT_FOUND (no file) / PARSE_ERROR / NOT_IN_FILE (no matching package).
+# NOT_FOUND (no file) / PARSE_ERROR / NOT_IN_FILE (no matching package) /
+# FILENAME_MATCH:<number of files>.
 record_result() {
     local value="$6"
 
@@ -38,6 +39,13 @@ record_result() {
         version_str="Not found"
         status="not_in_file"
         NOT_FOUND_COUNT=$((NOT_FOUND_COUNT + 1))
+    elif [[ "$value" == FILENAME_MATCH:* ]]; then
+        version_str="${value#*:} files"
+        if [[ "$version_str" == "1 files" ]]; then
+            version_str="1 file"
+        fi
+        status="filename_match"
+        FILENAME_MATCH_COUNT=$((FILENAME_MATCH_COUNT + 1))
     else
         version_str="$value"
         if [[ -z "$AFFECTED" ]]; then
@@ -103,6 +111,35 @@ mark_lock_conflicts() {
             RESULT_CONFLICT[i]=1
         fi
     done
+}
+
+# --filename-match: if no row of this branch from number $1 on has a version
+# and a file of commit $3 of repository $2 matches, the rows get the status
+# "replaced" (not shown, not counted), and one FILENAME MATCH row replaces
+# them: the first matching path and the number of files.
+# $4..$6: URL, branch and visibility of the row.
+filename_fallback() {
+    local i matches count
+    for ((i = $1; i < ${#RESULT_STATUS[@]}; i++)); do
+        case "${RESULT_STATUS[$i]}" in
+            affected | not_affected | unchecked | found) return 0 ;;
+        esac
+    done
+    # An assignment of its own: an error of filename_matches must stop the scan.
+    matches=$(filename_matches "$2" "$3")
+    if [[ -z "$matches" ]]; then
+        return 0
+    fi
+    count=$(printf '%s\n' "$matches" | awk 'END { print NR }')
+    for ((i = $1; i < ${#RESULT_STATUS[@]}; i++)); do
+        case "${RESULT_STATUS[$i]}" in
+            no_file) NO_FILE_COUNT=$((NO_FILE_COUNT - 1)) ;;
+            not_in_file) NOT_FOUND_COUNT=$((NOT_FOUND_COUNT - 1)) ;;
+            error) PARSE_ERROR_COUNT=$((PARSE_ERROR_COUNT - 1)) ;;
+        esac
+        RESULT_STATUS[i]="replaced"
+    done
+    record_result "$4" "$5" "${matches%%$'\n'*}" "$6" "" "FILENAME_MATCH:$count"
 }
 
 # With nodeEngines: for each package.json row from number $1 on, find the
@@ -221,7 +258,9 @@ scan_repos() {
 
             # No commit: no such branch, e.g. an empty repository.
             if [[ -z "$commit" ]]; then
-                record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
+                if [[ -n "$PACKAGES" ]]; then
+                    record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
+                fi
                 continue
             fi
 
@@ -269,8 +308,11 @@ scan_repos() {
             if [[ "$TYPE" == "nodeEngines" ]]; then
                 check_node_versions "$first_row" "$repo_name" "$target_branch"
             fi
-            if [[ $found -eq 0 ]]; then
+            if [[ $found -eq 0 && -n "$PACKAGES" ]]; then
                 record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
+            fi
+            if [[ -n "$FILENAME_MATCH" ]]; then
+                filename_fallback "$first_row" "$repo_name" "$commit" "$repo_url" "$target_branch" "$visibility"
             fi
         done <<< "$branches"
 

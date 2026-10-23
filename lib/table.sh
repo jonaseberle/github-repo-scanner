@@ -287,13 +287,15 @@ show_branch_column() {
 # The PATH column shows where the file was found: with --alternativePaths, and
 # with --type=node and nodeEngines, where a directory can have several files.
 show_path_column() {
-    [[ ( -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" || "$TYPE" == "nodeEngines" ) && $PATHS_HIDDEN -eq 0 ]]
+    [[ ( -n "$ALTERNATIVE_PATHS" || -n "$FILENAME_MATCH" || "$TYPE" == "node" || "$TYPE" == "nodeEngines" ) && $PATHS_HIDDEN -eq 0 ]]
 }
 
 # True if row $1 is printed: --hide-unknown and --hide-absent hide rows.
 # The summary still counts the hidden rows.
 row_shown() {
     case "${RESULT_STATUS[$1]}" in
+        # Rows of a branch with a FILENAME MATCH, see filename_fallback.
+        replaced) return 1 ;;
         no_file) [[ $HIDE_UNKNOWN -eq 0 ]] ;;
         not_in_file) [[ $HIDE_ABSENT -eq 0 ]] ;;
         *) return 0 ;;
@@ -312,7 +314,8 @@ hide_single_paths() {
     while IFS= read -r i; do
         RESULT_PATHS[i]=""
     done < <(for i in "${!RESULT_STATUS[@]}"; do
-            if row_shown "$i"; then
+            # The path of a FILENAME MATCH is the match: it stays.
+            if row_shown "$i" && [[ "${RESULT_STATUS[$i]}" != "filename_match" ]]; then
                 printf '%s\t%s\t%s\t%s\n' "$i" "${RESULT_URLS[$i]}" "${RESULT_BRANCHES[$i]}" "${RESULT_PATHS[$i]}"
             fi
         done | awk -F '\t' '
@@ -512,7 +515,7 @@ ordered_rows() {
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
     local wanted_status i first
     ORDERED_ROWS=""
-    for wanted_status in found not_in_file no_file error; do
+    for wanted_status in found filename_match not_in_file no_file error; do
         # See row_shown.
         if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
             continue
@@ -562,6 +565,7 @@ print_results() {
 
         case "$status" in
             affected | not_affected | unchecked | found) row_group="FOUND" ;;
+            filename_match) row_group="FILENAME MATCH ($FILENAME_MATCH)" ;;
             not_in_file) row_group="PACKAGE NOT FOUND" ;;
             no_file) row_group="$no_file_group" ;;
             *) row_group="PARSE ERROR" ;;
@@ -588,6 +592,9 @@ print_results() {
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
             print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
             has_results=1
+        elif [[ "$status" == "filename_match" ]]; then
+            print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
+            has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
             print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
             has_results=1
@@ -596,6 +603,8 @@ print_results() {
 
     if [[ ${#RESULT_STATUS[@]} -eq 0 && $SCAN_INTERRUPTED -eq 1 ]]; then
         printf '%s\n' "${YELLOW}No results yet.${NC}"
+    elif [[ -z "$PACKAGES" && $FILENAME_MATCH_COUNT -eq 0 ]]; then
+        printf '%s\n' "${YELLOW}No file matches --filename-match '$FILENAME_MATCH'.${NC}"
     elif [[ ${#RESULT_STATUS[@]} -eq 0 && $MERGED_COUNT -gt 0 ]]; then
         printf '%s\n' "${YELLOW}All matching branches are merged (hidden by --hide-merged).${NC}"
     elif [[ ${#RESULT_STATUS[@]} -eq 0 ]]; then
@@ -638,8 +647,14 @@ print_results() {
     if [[ -n "$BRANCHES" ]]; then
         rows="Branches"
     fi
+    if [[ -n "$FILENAME_MATCH" ]]; then
+        printf '%s\n' "  - $rows without a version, with a file name match: ${BLUE}$FILENAME_MATCH_COUNT${NC}"
+    fi
+    # Without --packages: only the file names were checked.
+    if [[ -z "$PACKAGES" ]]; then
+        :
     # A file can give several rows: count packages, not repositories.
-    if [[ -n "$AFFECTED" ]]; then
+    elif [[ -n "$AFFECTED" ]]; then
         printf '%s\n' "  - Packages affected: ${RED}$AFFECTED_COUNT${NC}"
         if [[ $UNCHECKED_COUNT -gt 0 ]]; then
             printf '%s\n' "  - Versions without a version range, not checked (\"?\"): ${YELLOW}$UNCHECKED_COUNT${NC}"
@@ -654,7 +669,9 @@ print_results() {
     if [[ $HIDE_ABSENT -eq 1 ]]; then
         absent_note=" (hidden)"
     fi
-    printf '%s\n' "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
+    if [[ -n "$PACKAGES" ]]; then
+        printf '%s\n' "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
+    fi
     if [[ $PARSE_ERROR_COUNT -gt 0 ]]; then
         printf '%s\n' "  - Dependency files that are not valid JSON: ${YELLOW}$PARSE_ERROR_COUNT${NC}"
     fi
@@ -664,7 +681,9 @@ print_results() {
     if [[ $LOCK_CONFLICT_COUNT -gt 0 ]]; then
         printf '%s\n' "  - Directories with package-lock.json and yarn.lock: ${YELLOW}$LOCK_CONFLICT_COUNT${NC}"
     fi
-    printf '%s\n' "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}$absent_note"
+    if [[ -n "$PACKAGES" ]]; then
+        printf '%s\n' "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}$absent_note"
+    fi
 
     local requests cache_hits oldest
     read -r requests cache_hits oldest <<< "$(awk '

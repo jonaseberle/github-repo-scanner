@@ -3,7 +3,9 @@
 
 # "all packages" or "packages matching <regex>", for headers and the summary.
 packages_label() {
-    if [[ "$PACKAGES" == "." ]]; then
+    if [[ -z "$PACKAGES" ]]; then
+        echo "file names matching ${COLOR_PATH}$FILENAME_MATCH${NC}"
+    elif [[ "$PACKAGES" == "." ]]; then
         echo "all packages"
     else
         echo "packages matching ${COLOR_PACKAGE}$PACKAGES${NC}"

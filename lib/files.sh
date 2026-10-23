@@ -37,6 +37,38 @@ fetch_dependency_file() {
     echo "$response"
 }
 
+# Print the paths of the files of commit $2 of repository $1, one per line,
+# from one request. The first line is "TRUNCATED" if GitHub gave only a part.
+commit_files() {
+    local listing
+    local request="repos/$OWNER/$1/git/trees/$2?recursive=1"
+    listing=$(gh_cached "api/repos/$OWNER/$1/commit/$2/tree?recursive=1" api "$request" \
+        --jq '(if .truncated then "TRUNCATED" else empty end), (.tree[] | select(.type == "blob") | .path)') || {
+        # Only a 404 means "no files" (e.g. an empty repository). Other errors must stop the scan.
+        if [[ "$(http_status "$listing")" == "404" ]]; then
+            return 0
+        fi
+        print_error "Failed to fetch the file list of $OWNER/$1 ($2): $listing"
+        exit 1
+    }
+    echo "$listing"
+}
+
+# Print the paths of commit $2 of repository $1 that match --filename-match
+# and not --excludePaths.
+filename_matches() {
+    local listing
+    listing=$(commit_files "$1" "$2")
+    if [[ "$listing" == TRUNCATED* ]]; then
+        print_warning_line "The file list of $OWNER/$1 ($2) is incomplete (too many files). Some files are not checked for --filename-match."
+    fi
+    # grep, not a bash loop: a file list can have many thousand lines.
+    # Both use POSIX extended regular expressions. No match is no error.
+    printf '%s\n' "$listing" | grep --invert-match --line-regexp --regexp=TRUNCATED |
+        grep --extended-regexp --regexp="$FILENAME_MATCH" |
+        { if [[ -n "$EXCLUDE_PATHS" ]]; then grep --extended-regexp --invert-match --regexp="$EXCLUDE_PATHS"; else cat; fi; } || true
+}
+
 # Print the dependency files of commit $2 as "directory<TAB>file", one per
 # line: in the root (".") and in the directories that match --alternativePaths.
 # Uses the file list of the commit: one request, also for many directories.
@@ -44,16 +76,8 @@ matching_dirs() {
     local repo_name="$1"
     local commit="$2"
     local listing
-    local request="repos/$OWNER/$repo_name/git/trees/$commit?recursive=1"
-    listing=$(gh_cached "api/repos/$OWNER/$repo_name/commit/$commit/tree?recursive=1" api "$request" \
-        --jq '(if .truncated then "TRUNCATED" else empty end), (.tree[] | select(.type == "blob") | .path)') || {
-        # Only a 404 means "no files" (e.g. an empty repository). Other errors must stop the scan.
-        if [[ "$(http_status "$listing")" == "404" ]]; then
-            return 0
-        fi
-        print_error "Failed to fetch the file list of $OWNER/$repo_name ($commit): $listing"
-        exit 1
-    }
+    # An assignment of its own: an error of commit_files must stop the scan.
+    listing=$(commit_files "$repo_name" "$commit")
     if [[ "$listing" == TRUNCATED* ]]; then
         print_warning_line "The file list of $OWNER/$repo_name ($commit) is incomplete (too many files). Some directories are not checked."
     fi
@@ -88,7 +112,7 @@ PREFETCH_FILES=25
 # Only for repositories without a cached entry. For --branches,
 # prefetch_repo_files does this per repository.
 prefetch_dependency_files() {
-    if [[ -n "$BRANCHES" || $USE_CACHE -eq 0 || $OFFLINE -eq 1 ]]; then
+    if [[ -z "$PACKAGES" || -n "$BRANCHES" || $USE_CACHE -eq 0 || $OFFLINE -eq 1 ]]; then
         return 0
     fi
 
@@ -135,6 +159,10 @@ REPO_CANDIDATES=""
 # fetch shows which exist. Once per commit: the file list can give a warning.
 collect_candidates() {
     REPO_CANDIDATES=""
+    # Without --packages (only --filename-match): no dependency files.
+    if [[ -z "$PACKAGES" ]]; then
+        return 0
+    fi
     local branch commit listing dir file
     while IFS=$'\t' read -r branch commit _; do
         if [[ -z "$commit" || $'\n'"$REPO_CANDIDATES" == *$'\n'"$commit"$'\t'* ]]; then

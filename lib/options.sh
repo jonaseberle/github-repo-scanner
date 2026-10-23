@@ -87,6 +87,15 @@ ${BOLD}OPTIONS:${NC}
                         Without a regex: all directories.
                         Example: --alternativePaths='^(webroot|packages/[^/]+)$'
 
+    --filename-match=<regex>
+                        Optional: a fallback for a branch without a version:
+                        if a file path matches this extended regular
+                        expression, the branch gets one row in the group
+                        FILENAME MATCH instead of its rows without a version.
+                        Example: --filename-match='typo3conf/' finds TYPO3
+                        projects without composer.lock. Without --packages
+                        (and --type), only the file names are checked.
+
     --excludePaths=<regex>
                         Optional, with --alternativePaths: do not check the
                         directories that match this extended regular
@@ -275,6 +284,9 @@ parse_args() {
                 # Without a value, every directory matches.
                 ALTERNATIVE_PATHS="."
                 ;;
+            --filename-match=*)
+                FILENAME_MATCH="${1#*=}"
+                ;;
             --excludePaths=*)
                 EXCLUDE_PATHS="${1#*=}"
                 EXCLUDE_PATHS_GIVEN=1
@@ -320,7 +332,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths)
+            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths|--filename-match)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;

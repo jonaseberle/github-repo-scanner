@@ -76,12 +76,13 @@ main() {
         print_error "--url is required, e.g. --url=https://github.com/orgs/ORG/repositories."
         missing=1
     fi
-    if [[ -z "$TYPE" ]]; then
-        print_error "--type is required: composer, composerJson, node, nodeJson or nodeEngines."
+    # --filename-match alone checks only the file names: no --packages, no --type.
+    if [[ -z "$PACKAGES" && -z "$FILENAME_MATCH" ]]; then
+        print_error "--packages is required: --packages=<regex>, or --packages for all packages (or --filename-match alone)."
         missing=1
     fi
-    if [[ -z "$PACKAGES" ]]; then
-        print_error "--packages is required: --packages=<regex>, or --packages for all packages."
+    if [[ -z "$TYPE" && -n "$PACKAGES" ]]; then
+        print_error "--type is required: composer, composerJson, node, nodeJson or nodeEngines."
         missing=1
     fi
     if [[ $missing -eq 1 ]]; then
@@ -93,7 +94,7 @@ main() {
     check_prerequisites
 
 
-    if [[ ! "$TYPE" =~ ^(composer|composerJson|node|nodeJson|nodeEngines)$ ]]; then
+    if [[ -n "$TYPE" && ! "$TYPE" =~ ^(composer|composerJson|node|nodeJson|nodeEngines)$ ]]; then
         print_error "Type must be 'composer', 'composerJson', 'node', 'nodeJson' or 'nodeEngines'."
         exit 1
     fi
@@ -131,6 +132,7 @@ main() {
     check_regex --packages "$PACKAGES"
     check_regex --alternativePaths "$ALTERNATIVE_PATHS"
     check_regex --excludePaths "$EXCLUDE_PATHS"
+    check_regex --filename-match "$FILENAME_MATCH"
 
     if [[ $USE_CACHE -eq 1 ]]; then
         print_info "Using the cache in $CACHE_DIR. Delete entries there or use --no-cache to fetch again."
@@ -142,7 +144,7 @@ main() {
         print_info "$(rate_limit_summary)"
     fi
 
-    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS excludePaths=$EXCLUDE_PATHS cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS excludePaths=$EXCLUDE_PATHS filename-match=$FILENAME_MATCH cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"
