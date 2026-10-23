@@ -226,7 +226,8 @@ scan_repos() {
         # Determine which branches to use
         local branches target_branch
         if [[ -n "$BRANCHES" ]]; then
-            print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS), branches"
+            # The numbers first: a long name is cut at the end of the line.
+            print_progress "" "Scanning repo: ($i/$TOTAL_REPOS) " "$CYAN" "$repo_name" "" ", branches"
             local listing merged
             listing=$(matching_branches "$repo_name" "$default_branch")
             merged=$(echo "$listing" | awk -F '\t' '$1 == "merged"' | awk 'END { print NR }')
@@ -262,10 +263,10 @@ scan_repos() {
             branch_number=$((branch_number + 1))
 
             if [[ -n "$BRANCHES" ]]; then
-                print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS), branch " \
-                    "$COLOR_BRANCH" "$target_branch" "" " ($branch_number/$branch_count)"
+                print_progress "" "Scanning repo: ($i/$TOTAL_REPOS) " "$CYAN" "$repo_name" "" \
+                    ", branch ($branch_number/$branch_count) " "$COLOR_BRANCH" "$target_branch"
             else
-                print_progress "" "Scanning repo: " "$CYAN" "$repo_name" "" " ($i/$TOTAL_REPOS)"
+                print_progress "" "Scanning repo: ($i/$TOTAL_REPOS) " "$CYAN" "$repo_name"
             fi
 
             # No commit: no such branch, e.g. an empty repository.
