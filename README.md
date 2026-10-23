@@ -319,6 +319,8 @@ In FOUND, a version in an `--affected` range is red, and the row ends with `*`. 
 
 With `--type=node`, the PATH column shows the lock file. A directory with both `package-lock.json` and `yarn.lock` gets a row for each file, a yellow `!` after the path, and a warning.
 
+With `--type=nodeEngines`, a `package.json` whose `.nvmrc` or `.node-version` is outside its `engines.node` gets a yellow `!` on both rows, and a warning. As in nvm, the nearest of these files in the directory of `package.json` or above it counts.
+
 During the scan, marks show the progress:
 
 | Mark | Meaning |
