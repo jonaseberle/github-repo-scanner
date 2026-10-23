@@ -2176,6 +2176,10 @@ PACKAGE_COLUMN_WIDTH=7
 set_column_widths() {
     local i width url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
     for i in "${!RESULT_STATUS[@]}"; do
+        # A hidden row must not widen a column.
+        if ! row_shown "$i"; then
+            continue
+        fi
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
         fi
@@ -2270,8 +2274,18 @@ show_path_column() {
     [[ ( -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" ) && $PATHS_HIDDEN -eq 0 ]]
 }
 
+# True if row $1 is printed: --hide-unknown and --hide-absent hide rows.
+# The summary still counts the hidden rows.
+row_shown() {
+    case "${RESULT_STATUS[$1]}" in
+        no_file) [[ $HIDE_UNKNOWN -eq 0 ]] ;;
+        not_in_file) [[ $HIDE_ABSENT -eq 0 ]] ;;
+        *) return 0 ;;
+    esac
+}
+
 # --hide-path: clear the path of the rows of each branch with only one
-# found dependency file. Without any path left, the PATH column goes.
+# shown dependency file. Without any path left, the PATH column goes.
 hide_single_paths() {
     if [[ $HIDE_PATH -eq 0 ]]; then
         return 0
@@ -2282,13 +2296,15 @@ hide_single_paths() {
     while IFS= read -r i; do
         RESULT_PATHS[i]=""
     done < <(for i in "${!RESULT_STATUS[@]}"; do
-            printf '%s\t%s\t%s\t%s\n' "$i" "${RESULT_URLS[$i]}" "${RESULT_BRANCHES[$i]}" "${RESULT_PATHS[$i]}"
+            if row_shown "$i"; then
+                printf '%s\t%s\t%s\t%s\n' "$i" "${RESULT_URLS[$i]}" "${RESULT_BRANCHES[$i]}" "${RESULT_PATHS[$i]}"
+            fi
         done | awk -F '\t' '
             $4 != "" { row[NR] = $1; key[NR] = $2 "\t" $3; if (!seen[$2 "\t" $3 "\t" $4]++) paths[$2 "\t" $3]++ }
             END { for (n in row) if (paths[key[n]] == 1) print row[n] }')
     PATHS_HIDDEN=1
     for i in "${!RESULT_STATUS[@]}"; do
-        if [[ -n "${RESULT_PATHS[$i]}" ]]; then
+        if row_shown "$i" && [[ -n "${RESULT_PATHS[$i]}" ]]; then
             PATHS_HIDDEN=0
             break
         fi
@@ -2479,7 +2495,7 @@ print_results() {
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
     local ordered_rows="" wanted_status i
     for wanted_status in found not_in_file no_file error; do
-        # The summary still counts the hidden rows.
+        # See row_shown.
         if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
             continue
         fi
