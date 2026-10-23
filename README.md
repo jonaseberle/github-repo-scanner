@@ -80,9 +80,9 @@ Options (values only in the form --option=value):
   --branch=<name>     Optional: specific branch to check (default: repo's default)
   --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a
-                      regex, all branches. AHEAD/BEHIND shows the commits of
-                      the branch that are not in the default branch, and the
-                      other way round
+                      regex, all branches. After the branch: "*" for the
+                      default branch, else "(+3/-2)": 3 commits ahead of the
+                      default branch, 2 behind
   --hide-unknown      Optional: hide rows without a dependency file
   --hide-absent       Optional: also hide rows without a matching package
   --hide-merged       Optional, with --branches: hide branches that are fully
