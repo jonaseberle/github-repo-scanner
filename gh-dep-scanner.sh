@@ -2170,9 +2170,7 @@ BRANCH_COLUMN_WIDTH=6
 PACKAGE_COLUMN_WIDTH=7
 
 # Fit the columns to the longest values and to the terminal width.
-# If the row is too wide, shrink in this order: the branch (a longer one gets
-# its own line), path and package (they wrap after a "/"), then the version (it
-# wraps at spaces), then the URL (it gets its own line, because a URL never wraps).
+# If the row is too wide, fit_columns chooses the widths.
 set_column_widths() {
     local i width url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
     for i in "${!RESULT_STATUS[@]}"; do
@@ -2229,31 +2227,9 @@ set_column_widths() {
         available=$((available - 11))
     fi
 
-    local over=$((url_width + branch_width + path_width + package_width + version_width - available))
-    local cut
-    if [[ $over -gt 0 && $branch_width -gt 12 ]]; then
-        cut=$((branch_width - 12 < over ? branch_width - 12 : over))
-        branch_width=$((branch_width - cut))
-        over=$((over - cut))
-    fi
-    if [[ $over -gt 0 && $path_width -gt 12 ]]; then
-        cut=$((path_width - 12 < over ? path_width - 12 : over))
-        path_width=$((path_width - cut))
-        over=$((over - cut))
-    fi
-    if [[ $over -gt 0 && $package_width -gt 12 ]]; then
-        cut=$((package_width - 12 < over ? package_width - 12 : over))
-        package_width=$((package_width - cut))
-        over=$((over - cut))
-    fi
-    if [[ $over -gt 0 && $version_width -gt 10 ]]; then
-        cut=$((version_width - 10 < over ? version_width - 10 : over))
-        version_width=$((version_width - cut))
-        over=$((over - cut))
-    fi
-    if [[ $over -gt 0 && $url_width -gt 20 ]]; then
-        cut=$((url_width - 20 < over ? url_width - 20 : over))
-        url_width=$((url_width - cut))
+    if [[ $((url_width + branch_width + path_width + package_width + version_width)) -gt $available ]]; then
+        read -r url_width branch_width path_width package_width version_width < <(fit_columns "$available" \
+            "$url_width" "$branch_width" "$path_width" "$package_width" "$version_width")
     fi
 
     URL_COLUMN_WIDTH=$url_width
@@ -2261,6 +2237,133 @@ set_column_widths() {
     PATH_COLUMN_WIDTH=$path_width
     BRANCH_COLUMN_WIDTH=$branch_width
     PACKAGE_COLUMN_WIDTH=$package_width
+}
+
+# Print the column widths "url branch path package version" for the shown
+# rows with the fewest lines in the table, as print_row prints them:
+# a URL or branch that is too wide gets its own line, a path or package wraps
+# after a "/", a version at spaces. $1: the space for the cells, $2-$6: the
+# widest values. Tries the 8 largest widths that occur in each of the URL,
+# branch and path columns. Package and version get the rest.
+fit_columns() {
+    local i
+    # Identical rows are counted once, with their number.
+    # Short option: BSD uniq (macOS) has no --count.
+    for i in "${!RESULT_STATUS[@]}"; do
+        if ! row_shown "$i"; then
+            continue
+        fi
+        local path="" label=""
+        if show_path_column; then
+            path="${RESULT_PATHS[$i]}"
+            if [[ ${RESULT_LOCK_CONFLICT[$i]} -eq 1 ]]; then
+                path+="!"
+            fi
+        fi
+        if show_branch_column; then
+            branch_label "${RESULT_BRANCHES[$i]}" "${RESULT_BRANCH_STATUS[$i]}"
+            label="$BRANCH_LABEL"
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "${#RESULT_URLS[$i]}" "${#label}" "$path" "${RESULT_PACKAGES[$i]}" "${RESULT_VERSIONS[$i]}"
+    done | sort | uniq -c | awk -v available="$1" -v columns="$TERM_COLUMNS" \
+        -v max_url="$2" -v max_branch="$3" -v max_path="$4" -v max_package="$5" -v max_version="$6" \
+        -v show_branch="$(show_branch_column && echo 1 || echo 0)" -v show_path="$(show_path_column && echo 1 || echo 0)" '
+        # The lines of wrap_path.
+        function path_lines(text, width,   key, n, used, rest, part, slash) {
+            key = text SUBSEP width
+            if (key in PATH_LINES) return PATH_LINES[key]
+            n = 0; used = 0; rest = text
+            while (rest != "") {
+                slash = index(rest, "/")
+                if (slash > 0) { part = substr(rest, 1, slash); rest = substr(rest, slash + 1) }
+                else { part = rest; rest = "" }
+                if (used > 0 && used + length(part) > width) { n++; used = 0 }
+                used += length(part)
+                while (used > width) { n++; used -= width }
+            }
+            return PATH_LINES[key] = n + 1
+        }
+        # The lines of wrap_text.
+        function text_lines(text, width,   key, n, words, count, j, word, line) {
+            if (length(text) <= width) return 1
+            key = text SUBSEP width
+            if (key in TEXT_LINES) return TEXT_LINES[key]
+            n = 0; line = ""
+            count = split(text, words, " ")
+            for (j = 1; j <= count; j++) {
+                word = words[j]
+                while (length(word) > width) {
+                    if (line != "") { n++; line = "" }
+                    n++; word = substr(word, width + 1)
+                }
+                if (line == "") line = word
+                else if (length(line) + 1 + length(word) <= width) line = line " " word
+                else { n++; line = word }
+            }
+            if (line != "") n++
+            return TEXT_LINES[key] = n
+        }
+        # The 8 largest values of list[1..n] from at least low, and low: in LIST, largest first.
+        function candidates(list, n, low,   seen, i, j, k, value, tmp) {
+            delete LIST; k = 0
+            for (i = 1; i <= n; i++) {
+                value = list[i]
+                if (value > low && !(value in seen)) { seen[value] = 1; LIST[++k] = value }
+            }
+            for (i = 2; i <= k; i++) for (j = i; j > 1 && LIST[j] > LIST[j - 1]; j--) { tmp = LIST[j]; LIST[j] = LIST[j - 1]; LIST[j - 1] = tmp }
+            if (k > 8) k = 8
+            LIST[++k] = low
+            return k
+        }
+        {
+            # "uniq -c": the number, then the fields of the row.
+            count = $1; line = $0; sub(/^ *[0-9]+ /, "", line)
+            split(line, field, "\t")
+            rows++; WEIGHT[rows] = count + 0
+            URL[rows] = field[1] + 0; BRANCH[rows] = field[2] + 0
+            PATH[rows] = field[3]; PACKAGE[rows] = field[4]; VERSION[rows] = field[5]
+            urls[rows] = URL[rows]; branches[rows] = BRANCH[rows]; paths[rows] = length(PATH[rows])
+        }
+        END {
+            min_url = max_url < 20 ? max_url : 20
+            min_branch = max_branch < 12 ? max_branch : 12
+            min_path = max_path < 12 ? max_path : 12
+            min_package = max_package < 12 ? max_package : 12
+            min_version = max_version < 10 ? max_version : 10
+            nu = candidates(urls, rows, min_url); for (i = 1; i <= nu; i++) CU[i] = LIST[i]
+            nb = 1; CB[1] = max_branch
+            if (show_branch) { nb = candidates(branches, rows, min_branch); for (i = 1; i <= nb; i++) CB[i] = LIST[i] }
+            np = 1; CP[1] = max_path
+            if (show_path) { np = candidates(paths, rows, min_path); for (i = 1; i <= np; i++) CP[i] = LIST[i] }
+
+            best = -1
+            for (a = 1; a <= nu; a++) for (b = 1; b <= nb; b++) for (c = 1; c <= np; c++) {
+                u = CU[a]; w = CB[b]; p = CP[c]
+                rest = available - u - w - p
+                k = max_package; v = max_version
+                if (k + v > rest) {
+                    k = rest - v
+                    if (k < min_package) { k = min_package; v = rest - k }
+                    if (v < min_version) continue
+                }
+                total = 0
+                for (r = 1; r <= rows && (best < 0 || total < best); r++) {
+                    cells = text_lines(VERSION[r], v)
+                    n = path_lines(PACKAGE[r], k); if (n > cells) cells = n
+                    if (show_path) { n = path_lines(PATH[r], p); if (n > cells) cells = n }
+                    extra = URL[r] > u
+                    # In the PATH column of a row without a path, see print_row.
+                    if (show_branch && BRANCH[r] > w && !(show_path && PATH[r] == "" && BRANCH[r] <= w + 1 + p)) {
+                        # On the line of the URL if it fits there, else on a line of its own.
+                        extra = (!extra && u + 1 + BRANCH[r] <= columns - 1) ? 1 : 2
+                    }
+                    total += WEIGHT[r] * (extra + cells)
+                }
+                if (best < 0 || total < best) { best = total; result = u " " w " " p " " k " " v }
+            }
+            if (best < 0) result = min_url " " min_branch " " min_path " " min_package " " min_version
+            print result
+        }'
 }
 
 # The BRANCH column: only with --branches.
@@ -2329,8 +2432,9 @@ branch_label() {
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
-# A branch does not wrap either: a branch that is too wide gets a line of its
-# own, from the branch column on, or further left if the line is too short.
+# A branch does not wrap either: a branch that is too wide uses the empty
+# PATH cell of its row, or gets a line of its own, from the branch column on,
+# or further left if the line is too short.
 print_row() {
     local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
     local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" lock_conflict="${11:-0}"
@@ -2356,7 +2460,15 @@ print_row() {
         printf "%s%s%s\n" "$row_color" "$url" "$NC"
         url_lines=("")
     fi
-    if show_branch_column && [[ ${#branch} -gt $BRANCH_COLUMN_WIDTH ]]; then
+    # A branch that is too wide can use the PATH column of a row without a path.
+    local spill=0
+    if show_branch_column && show_path_column && [[ -z "$path" && ${#branch} -gt $BRANCH_COLUMN_WIDTH &&
+        ${#branch} -le $((BRANCH_COLUMN_WIDTH + 1 + PATH_COLUMN_WIDTH)) ]]; then
+        spill=1
+    fi
+    if [[ $spill -eq 1 ]]; then
+        branch_lines=("$branch")
+    elif show_branch_column && [[ ${#branch} -gt $BRANCH_COLUMN_WIDTH ]]; then
         # Keep the last column free, as in set_column_widths.
         local start=$((URL_COLUMN_WIDTH + 1)) latest=$((TERM_COLUMNS - 1 - ${#branch}))
         if [[ -n "${url_lines[0]}" && $start -le $latest ]]; then
@@ -2427,11 +2539,14 @@ print_row() {
     for ((i = 0; i < count; i++)); do
         printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
         row="$row_color$cell$NC"
-        if show_branch_column; then
+        if [[ $spill -eq 1 && $i -eq 0 ]]; then
+            printf -v cell "%-*s" "$((BRANCH_COLUMN_WIDTH + 1 + PATH_COLUMN_WIDTH))" "${branch_lines[$i]:-}"
+            row+=" $branch_color$cell$NC"
+        elif show_branch_column; then
             printf -v cell "%-*s" "$BRANCH_COLUMN_WIDTH" "${branch_lines[$i]:-}"
             row+=" $branch_color$cell$NC"
         fi
-        if show_path_column; then
+        if show_path_column && ! [[ $spill -eq 1 && $i -eq 0 ]]; then
             printf -v cell "%-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
             # Pad first, then color the "!": the color codes have no width.
             if [[ $lock_conflict -eq 1 && "${path_lines[$i]:-}" == *"!" && $((i + 1)) -eq ${#path_lines[@]} ]]; then
