@@ -35,6 +35,9 @@ ALTERNATIVE_PATHS=""
 EXCLUDE_PATHS=""
 # 1 if --excludePaths was given: then nodeEngines does not set its default.
 EXCLUDE_PATHS_GIVEN=0
+# The default of --excludePaths with nodeEngines: the directories of the
+# package managers. Each dependency there has a package.json with "engines".
+NODE_ENGINES_EXCLUDE_PATHS='(^|/)(node_modules|bower_components|jspm_packages|web_modules|vendor|\.yarn|\.pnpm-store)/'
 REPO_FILTER=""
 SHOW_VISIBILITY=0
 # --hide-path: no path for a branch with only one found dependency file.

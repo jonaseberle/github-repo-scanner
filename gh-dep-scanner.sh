@@ -96,9 +96,8 @@ main() {
         exit 1
     fi
 
-    # Each dependency in node_modules has a package.json with "engines".
     if [[ "$TYPE" == "nodeEngines" && $EXCLUDE_PATHS_GIVEN -eq 0 ]]; then
-        EXCLUDE_PATHS="node_modules/"
+        EXCLUDE_PATHS="$NODE_ENGINES_EXCLUDE_PATHS"
     fi
 
 
