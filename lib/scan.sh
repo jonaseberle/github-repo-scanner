@@ -128,10 +128,10 @@ rows_have_version() {
 # $4 of repository $3 matches, the rows of the branch from number $1 to $2
 # (excluded) get the status "replaced" (not shown, not counted), and one
 # FILENAME MATCH row replaces them: the first matching path up to the end of
-# the match (typo3conf/ENABLE_INSTALL_TOOL with "typo3conf/" gives
-# typo3conf/), and the number of files. $5..$7: URL, branch and visibility.
+# the match and its name (typo3conf/ENABLE_INSTALL_TOOL with "typo3conf/"
+# gives typo3conf/), and the number of files. $5..$7: URL, branch and visibility.
 filename_fallback() {
-    local i matches count path
+    local i matches count path rest
     # An assignment of its own: an error of filename_matches must stop the scan.
     matches=$(filename_matches "$3" "$4")
     if [[ -z "$matches" ]]; then
@@ -148,7 +148,15 @@ filename_fallback() {
     done
     path="${matches%%$'\n'*}"
     if [[ "$path" =~ $FILENAME_MATCH ]]; then
+        rest="${path#*"${BASH_REMATCH[0]}"}"
         path="${path%%"${BASH_REMATCH[0]}"*}${BASH_REMATCH[0]}"
+        # Up to the end of the name: "wp" in wordpress/wp-content/x gives
+        # wordpress/wp-content/, not wordpress/wp.
+        if [[ "$path" != */ && "$rest" == */* ]]; then
+            path+="${rest%%/*}/"
+        elif [[ "$path" != */ ]]; then
+            path+="$rest"
+        fi
     fi
     record_result "$5" "$6" "$path" "$7" "" "FILENAME_MATCH:$count"
 }
