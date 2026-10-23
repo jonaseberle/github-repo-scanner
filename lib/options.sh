@@ -87,6 +87,11 @@ ${BOLD}OPTIONS:${NC}
                         Without a regex: all directories.
                         Example: --alternativePaths='^(webroot|packages/[^/]+)$'
 
+    --excludePaths=<regex>
+                        Optional, with --alternativePaths: do not check the
+                        directories that match this extended regular
+                        expression. Example: --excludePaths=node_modules
+
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
 
@@ -223,6 +228,9 @@ parse_args() {
                 # Without a value, every directory matches.
                 ALTERNATIVE_PATHS="."
                 ;;
+            --excludePaths=*)
+                EXCLUDE_PATHS="${1#*=}"
+                ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
                 ;;
@@ -252,7 +260,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age)
+            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;

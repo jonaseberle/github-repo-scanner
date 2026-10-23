@@ -31,6 +31,8 @@ HIDE_MERGED=0
 HIDE_UNKNOWN=0
 HIDE_ABSENT=0
 ALTERNATIVE_PATHS=""
+# --excludePaths: directories that --alternativePaths does not check.
+EXCLUDE_PATHS=""
 REPO_FILTER=""
 SHOW_VISIBILITY=0
 # --hide-path: no path for a branch with only one found dependency file.

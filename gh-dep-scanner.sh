@@ -124,6 +124,7 @@ main() {
     check_regex --repo "$REPO_FILTER"
     check_regex --packages "$PACKAGES"
     check_regex --alternativePaths "$ALTERNATIVE_PATHS"
+    check_regex --excludePaths "$EXCLUDE_PATHS"
 
     if [[ $USE_CACHE -eq 1 ]]; then
         print_info "Using the cache in $CACHE_DIR. Delete entries there or use --no-cache to fetch again."
@@ -135,7 +136,7 @@ main() {
         print_info "$(rate_limit_summary)"
     fi
 
-    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS excludePaths=$EXCLUDE_PATHS cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"

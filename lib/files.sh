@@ -60,6 +60,9 @@ matching_dirs() {
 
     local dir file
     while IFS=$'\t' read -r dir file; do
+        if [[ -n "$EXCLUDE_PATHS" && "$dir" =~ $EXCLUDE_PATHS ]]; then
+            continue
+        fi
         if [[ "$dir" == "." || "$dir" =~ $ALTERNATIVE_PATHS ]]; then
             printf '%s\t%s\n' "$dir" "$file"
         fi
