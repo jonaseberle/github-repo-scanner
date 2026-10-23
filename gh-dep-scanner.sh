@@ -21,6 +21,8 @@ NC=$'\033[0m' # No Color
 BOLD=$'\033[1m'
 # One color per kind of value, wherever it is printed.
 COLOR_BRANCH=$'\033[0;35m'
+# The default branch with --branches: bold, in one code (see COLOR_AFFECTED).
+COLOR_DEFAULT_BRANCH=$'\033[1;35m'
 COLOR_PATH=$'\033[0;34m'
 COLOR_VERSION=$'\033[1m'
 COLOR_VISIBILITY=$'\033[2m'
@@ -92,8 +94,9 @@ declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
 declare -a RESULT_PATHS=()
 declare -a RESULT_BRANCHES=()
-# "ahead/behind": the commits of the branch that are not in the default
-# branch, and the other way round. "default" for the default branch.
+# With --branches: "ahead/behind", the commits of the branch that are not in
+# the default branch, and the other way round. "default" for the default
+# branch, "?" if GitHub gave no comparison.
 declare -a RESULT_BRANCH_STATUS=()
 # The branch status of the branch that is scanned now, for record_result.
 CURRENT_BRANCH_STATUS=""
@@ -172,8 +175,9 @@ ${BOLD}OPTIONS:${NC}
     --branches[=regex]  Optional: check all branches that match this extended
                         regular expression, instead of one branch.
                         Without a regex: check all branches.
-                        AHEAD/BEHIND shows the commits of the branch that are
-                        not in the default branch, and the other way round.
+                        After the branch: "*" for the default branch, else
+                        "(+3/-2)": 3 commits that are not in the default
+                        branch, and 2 commits of it that are not in the branch.
                         Examples: --branches='^feat/|^upgrade/'
                                   --branches=typo3 --branches='upgrade$'
 
@@ -2109,7 +2113,6 @@ URL_COLUMN_WIDTH=55
 VERSION_COLUMN_WIDTH=15
 PATH_COLUMN_WIDTH=4
 BRANCH_COLUMN_WIDTH=6
-BRANCH_STATUS_COLUMN_WIDTH=12
 PACKAGE_COLUMN_WIDTH=7
 
 # Fit the columns to the longest values and to the terminal width.
@@ -2118,8 +2121,6 @@ PACKAGE_COLUMN_WIDTH=7
 # wraps at spaces), then the URL (it gets its own line, because a URL never wraps).
 set_column_widths() {
     local i url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
-    # The width of the header "AHEAD/BEHIND".
-    local status_width=12
     for i in "${!RESULT_STATUS[@]}"; do
         if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
             url_width=${#RESULT_URLS[$i]}
@@ -2130,11 +2131,12 @@ set_column_widths() {
         if show_path_column && [[ ${#RESULT_PATHS[$i]} -gt $path_width ]]; then
             path_width=${#RESULT_PATHS[$i]}
         fi
-        if show_branch_column && [[ ${#RESULT_BRANCHES[$i]} -gt $branch_width ]]; then
-            branch_width=${#RESULT_BRANCHES[$i]}
-        fi
-        if show_branch_column && [[ ${#RESULT_BRANCH_STATUS[$i]} -gt $status_width ]]; then
-            status_width=${#RESULT_BRANCH_STATUS[$i]}
+        # The branch with its status, as print_row shows it.
+        if show_branch_column; then
+            branch_label "${RESULT_BRANCHES[$i]}" "${RESULT_BRANCH_STATUS[$i]}"
+            if [[ ${#BRANCH_LABEL} -gt $branch_width ]]; then
+                branch_width=${#BRANCH_LABEL}
+            fi
         fi
         if [[ ${#RESULT_PACKAGES[$i]} -gt $package_width ]]; then
             package_width=${#RESULT_PACKAGES[$i]}
@@ -2159,8 +2161,6 @@ set_column_widths() {
         if [[ $branch_width -lt 6 ]]; then
             branch_width=6
         fi
-        # The branch status does not shrink: it is short.
-        available=$((available - 1 - BRANCH_STATUS_COLUMN_WIDTH))
     fi
     if [[ $SHOW_VISIBILITY -eq 1 ]]; then
         available=$((available - 11))
@@ -2197,7 +2197,6 @@ set_column_widths() {
     VERSION_COLUMN_WIDTH=$version_width
     PATH_COLUMN_WIDTH=$path_width
     BRANCH_COLUMN_WIDTH=$branch_width
-    BRANCH_STATUS_COLUMN_WIDTH=$status_width
     PACKAGE_COLUMN_WIDTH=$package_width
 }
 
@@ -2212,7 +2211,19 @@ show_path_column() {
     [[ -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" ]]
 }
 
-# Arguments: color, URL, branch, branch status, path, package, version,
+# Set BRANCH_LABEL to branch $1 with its status $2: "main *" for the default
+# branch, "feat/x (+3/-2)" for 3 commits ahead and 2 behind, "feat/x (?)".
+# A variable, not output: no subshell for each row.
+branch_label() {
+    case "$2" in
+        "") BRANCH_LABEL="$1" ;;
+        default) BRANCH_LABEL="$1 *" ;;
+        "?") BRANCH_LABEL="$1 (?)" ;;
+        *) BRANCH_LABEL="$1 (+${2%/*}/-${2#*/})" ;;
+    esac
+}
+
+# Arguments: color, URL, branch, branch status (see branch_label), path, package, version,
 # visibility, and optionally the color of the version and a mark for the end
 # of the row.
 # A path, package or version that is too wide wraps and stays in its column.
@@ -2229,6 +2240,14 @@ print_row() {
     local version_color="${version_color_arg:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY"
     if [[ -z "$row_color" || "$row_color" == "$BOLD" ]]; then
         branch_color="$row_color" path_color="$row_color" package_color="$row_color" version_color="$row_color" visibility_color="$row_color"
+    fi
+    # Before the width checks: set_column_widths counts the label too.
+    if [[ -n "$branch_status" ]]; then
+        branch_label "$branch" "$branch_status"
+        branch="$BRANCH_LABEL"
+        if [[ "$branch_status" == "default" && -n "$row_color" && "$row_color" != "$BOLD" ]]; then
+            branch_color="$COLOR_DEFAULT_BRANCH"
+        fi
     fi
 
     local -a url_lines=("$url") branch_lines=() path_lines=() package_lines=() version_lines=()
@@ -2307,12 +2326,6 @@ print_row() {
         if show_branch_column; then
             printf -v cell "%-*s" "$BRANCH_COLUMN_WIDTH" "${branch_lines[$i]:-}"
             row+=" $branch_color$cell$NC"
-            cell=""
-            if [[ $i -eq 0 ]]; then
-                cell="$branch_status"
-            fi
-            printf -v cell "%-*s" "$BRANCH_STATUS_COLUMN_WIDTH" "$cell"
-            row+=" $branch_color$cell$NC"
         fi
         if show_path_column; then
             printf -v cell "%-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
@@ -2351,15 +2364,22 @@ print_results() {
 
     # Print header
     set_column_widths
-    print_row "$BOLD" "REPO URL" "BRANCH" "AHEAD/BEHIND" "PATH" "PACKAGE" "VERSION" "VISIBILITY"
-    print_row "" "--------" "------" "------------" "----" "-------" "-------" "----------"
+    print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY"
+    print_row "" "--------" "------" "" "----" "-------" "-------" "----------"
 
     local has_results=0
 
     # Sort the rows by URL, branch, path and package. The index is the last field.
+    # The default branch first: "0" before its name, "1" before the others.
     local sorted_rows
     # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
-    sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do echo "${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"; done | sort --ignore-case | awk '{ print $NF }')
+    sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do
+        first=1
+        if [[ "${RESULT_BRANCH_STATUS[$i]}" == "default" ]]; then
+            first=0
+        fi
+        echo "${RESULT_URLS[$i]} $first${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"
+    done | sort --ignore-case | awk '{ print $NF }')
 
     # Group the rows: version found, package not found, no file, parse error.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
