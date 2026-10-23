@@ -302,7 +302,7 @@ Summary:
 
 Rows are grouped: FOUND (the package is in the dependency file), PACKAGE NOT FOUND (the package is not in it), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
 
-In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green.
+In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green. A version that is no version range (e.g. `dev-main`) ends with a yellow `?`.
 
 With `--type=node`, the PATH column shows the lock file. A directory with both `package-lock.json` and `yarn.lock` gets a row for each file, a yellow `!` after the path, and a warning.
 
@@ -329,21 +329,24 @@ https://github.com/OWNER/REPO
 
 ## Version Comparison Logic
 
-`--affected` takes ranges like the security advisories on packagist.org: `|` separates alternatives, `,` joins conditions that must all hold, e.g. `>=13.0.0,<13.3.5|<6.4.5`. Operators: `>=`, `>`, `<=`, `<`, `=`, `!=`.
+`--affected` takes ranges like the security advisories on packagist.org: `|` separates alternatives, `,` joins conditions that must all hold, e.g. `>=13.0.0,<13.3.5|<6.4.5`.
 
-For a constraint (`--type=composerJson`, `--type=nodeJson`), the script takes its first version:
+A row is affected if its version range and the `--affected` ranges have a version in common. An installed version (`composer.lock`, `package-lock.json`, `yarn.lock`) is a range of one version. A constraint uses the syntax of its file: Composer for `composer.json`, npm for `package.json`.
 
-| Constraint | Extracted version | Affected by `<4`? |
-|------------|-------------------|----------|
-| `^3.2` | 3.2.0 | Yes |
-| `~3.1.0` | 3.1.0 | Yes |
-| `>=3.0` | 3.0.0 | Yes |
-| `3.*` | 3.0.0 | Yes |
-| `^4.0` | 4.0.0 | No |
-| `4.1.2` | 4.1.2 | No |
-| `v3.5.2` (from `composer.lock`) | 3.5.2 | Yes |
-| `*` | 0.0.0 | Yes (conservative) |
-| `dev-main` | 0.0.0 | Yes (conservative) |
+| Constraint | Versions | Affected by `<4`? |
+|------------|----------|-------------------|
+| `^3.2` | `>=3.2.0 <4.0.0` | Yes |
+| `^4.0` | `>=4.0.0 <5.0.0` | No |
+| `>=3.0 <5.0` | `>=3.0.0 <5.0.0` | Yes |
+| `^4.0 \|\| ^3.0` | `>=4.0.0 <5.0.0` or `>=3.0.0 <4.0.0` | Yes |
+| `~3.1` (Composer) | `>=3.1.0 <4.0.0` | Yes |
+| `~3.1` (npm) | `>=3.1.0 <3.2.0` | Yes |
+| `~4.1` (Composer) | `>=4.1.0 <5.0.0` | No |
+| `3.*`, `3.x` | `>=3.0.0 <4.0.0` | Yes |
+| `*` | all | Yes |
+| `dev-main`, `latest`, `file:...` | no version range | not checked: `?` |
+
+A pre-release is taken as its release: `1.2.3-beta.1` is 1.2.3.
 
 ## Limitations
 
