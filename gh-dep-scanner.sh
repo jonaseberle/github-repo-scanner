@@ -305,7 +305,7 @@ print_error() {
     if [[ $PROGRESS_SHOWN -eq 1 ]]; then
         echo "" >&2
     fi
-    echo -e "${RED}Error: $1${NC}" >&2
+    printf '%s\n' "${RED}Error: $1${NC}" >&2
 }
 
 # A warning during the scan, on stderr: the caller may capture stdout.
@@ -314,19 +314,19 @@ print_warning_line() {
     if [[ $PROGRESS_SHOWN -eq 1 ]]; then
         echo "" >&2
     fi
-    echo -e "${YELLOW}Warning: $1${NC}" >&2
+    printf '%s\n' "${YELLOW}Warning: $1${NC}" >&2
 }
 
 print_success() {
-    echo -e "${GREEN}$1${NC}"
+    printf '%s\n' "${GREEN}$1${NC}"
 }
 
 print_info() {
-    echo -e "${BLUE}$1${NC}"
+    printf '%s\n' "${BLUE}$1${NC}"
 }
 
 print_warning() {
-    echo -e "${YELLOW}$1${NC}"
+    printf '%s\n' "${YELLOW}$1${NC}"
 }
 
 PROGRESS_SHOWN=0
@@ -940,13 +940,13 @@ parse_args() {
 #===============================================================================
 
 interactive_mode() {
-    echo -e "${BOLD}GitHub Dependency Scanner - Interactive Mode${NC}"
+    printf '%s\n' "${BOLD}GitHub Dependency Scanner - Interactive Mode${NC}"
     echo "=============================================="
     echo ""
 
     # URL
     if [[ -z "$URL" ]]; then
-        echo -e "${CYAN}Enter GitHub URL:${NC}"
+        printf '%s\n' "${CYAN}Enter GitHub URL:${NC}"
         echo "  Examples:"
         echo "    https://github.com/orgs/YOUR_ORG/repositories"
         echo "    https://github.com/USERNAME?tab=repositories"
@@ -958,7 +958,7 @@ interactive_mode() {
 
     # Type
     if [[ -z "$TYPE" ]]; then
-        echo -e "${CYAN}Select dependency type:${NC}"
+        printf '%s\n' "${CYAN}Select dependency type:${NC}"
         echo "  1) composer (PHP - composer.lock, installed version)"
         echo "  2) node (JavaScript - package-lock.json or yarn.lock, installed version)"
         echo "  3) composerJson (PHP - composer.json, version constraint)"
@@ -979,7 +979,7 @@ interactive_mode() {
 
     # Packages
     if [[ -z "$PACKAGES" ]]; then
-        echo -e "${CYAN}Enter a regular expression for the package names (press Enter for all packages):${NC}"
+        printf '%s\n' "${CYAN}Enter a regular expression for the package names (press Enter for all packages):${NC}"
         if [[ "$TYPE" != node* ]]; then
             echo "  Example: ^livewire/livewire\$, ^typo3/cms-"
         else
@@ -994,7 +994,7 @@ interactive_mode() {
 
     # Affected versions
     if [[ -z "$AFFECTED" ]]; then
-        echo -e "${CYAN}Enter the affected version ranges (press Enter to show all found packages):${NC}"
+        printf '%s\n' "${CYAN}Enter the affected version ranges (press Enter to show all found packages):${NC}"
         echo "  Example: <4, >=13.0.0,<13.3.5|<6.4.5"
         read -r -p "> " AFFECTED
         echo ""
@@ -1002,7 +1002,7 @@ interactive_mode() {
 
     # Branch (optional)
     if [[ -z "$BRANCH" && -z "$BRANCHES" ]]; then
-        echo -e "${CYAN}Enter branch name (press Enter for default branch):${NC}"
+        printf '%s\n' "${CYAN}Enter branch name (press Enter for default branch):${NC}"
         read -r -p "> " BRANCH
         echo ""
     fi
@@ -1963,13 +1963,13 @@ mark_lock_conflicts() {
 
 scan_repos() {
     echo ""
-    echo -e "${BOLD}Scanning $OWNER repositories for ${NC}$(packages_label)${AFFECTED:+, affected: ${COLOR_VERSION}$AFFECTED${NC}}..."
+    printf '%s\n' "${BOLD}Scanning $OWNER repositories for ${NC}$(packages_label)${AFFECTED:+, affected: ${COLOR_VERSION}$AFFECTED${NC}}..."
     if [[ -n "$BRANCHES" ]]; then
-        echo -e "Branches: matching ${COLOR_BRANCH}$BRANCHES${NC}"
+        printf '%s\n' "Branches: matching ${COLOR_BRANCH}$BRANCHES${NC}"
     elif [[ -n "$BRANCH" ]]; then
-        echo -e "Branch: ${COLOR_BRANCH}$BRANCH${NC}"
+        printf '%s\n' "Branch: ${COLOR_BRANCH}$BRANCH${NC}"
     else
-        echo -e "Branch: ${COLOR_BRANCH}default${NC}"
+        printf '%s\n' "Branch: ${COLOR_BRANCH}default${NC}"
     fi
     echo ""
 
@@ -2582,7 +2582,7 @@ print_results() {
     dep_file_name="${dep_file_name// / or }"
 
     echo ""
-    echo -e "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${AFFECTED:+ (affected: ${COLOR_VERSION}$AFFECTED${NC})}"
+    printf '%s\n' "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${AFFECTED:+ (affected: ${COLOR_VERSION}$AFFECTED${NC})}"
     echo "================================================================================"
     echo ""
 
@@ -2643,7 +2643,7 @@ print_results() {
         if [[ "$row_group" != "$group" ]]; then
             group="$row_group"
             echo ""
-            echo -e "${BOLD}$group${NC}"
+            printf '%s\n' "${BOLD}$group${NC}"
         fi
 
         # With --affected, the color of the version and a "*" at the end show
@@ -2666,19 +2666,19 @@ print_results() {
     done
 
     if [[ ${#RESULT_STATUS[@]} -eq 0 && $SCAN_INTERRUPTED -eq 1 ]]; then
-        echo -e "${YELLOW}No results yet.${NC}"
+        printf '%s\n' "${YELLOW}No results yet.${NC}"
     elif [[ ${#RESULT_STATUS[@]} -eq 0 && $MERGED_COUNT -gt 0 ]]; then
-        echo -e "${YELLOW}All matching branches are merged (hidden by --hide-merged).${NC}"
+        printf '%s\n' "${YELLOW}All matching branches are merged (hidden by --hide-merged).${NC}"
     elif [[ ${#RESULT_STATUS[@]} -eq 0 ]]; then
-        echo -e "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
+        printf '%s\n' "${YELLOW}No branch matches --branches '$BRANCHES'.${NC}"
     elif [[ $has_results -eq 0 ]]; then
-        echo -e "${GREEN}No found package is affected.${NC}"
+        printf '%s\n' "${GREEN}No found package is affected.${NC}"
     fi
 
     # Summary
     echo ""
     echo "================================================================================"
-    echo -e "${BOLD}Summary:${NC}"
+    printf '%s\n' "${BOLD}Summary:${NC}"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         echo "  - Total repos scanned: $((SCAN_POSITION - 1)) of $TOTAL_REPOS (stopped in repo $SCAN_POSITION)"
     else
@@ -2711,9 +2711,9 @@ print_results() {
     fi
     # A file can give several rows: count packages, not repositories.
     if [[ -n "$AFFECTED" ]]; then
-        echo -e "  - Packages affected: ${RED}$AFFECTED_COUNT${NC}"
+        printf '%s\n' "  - Packages affected: ${RED}$AFFECTED_COUNT${NC}"
     else
-        echo -e "  - Packages found: ${GREEN}$FOUND_COUNT${NC}"
+        printf '%s\n' "  - Packages found: ${GREEN}$FOUND_COUNT${NC}"
     fi
     local unknown_note="" absent_note=""
     if [[ $HIDE_UNKNOWN -eq 1 ]]; then
@@ -2722,14 +2722,14 @@ print_results() {
     if [[ $HIDE_ABSENT -eq 1 ]]; then
         absent_note=" (hidden)"
     fi
-    echo -e "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
+    printf '%s\n' "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
     if [[ $PARSE_ERROR_COUNT -gt 0 ]]; then
-        echo -e "  - Dependency files that are not valid JSON: ${YELLOW}$PARSE_ERROR_COUNT${NC}"
+        printf '%s\n' "  - Dependency files that are not valid JSON: ${YELLOW}$PARSE_ERROR_COUNT${NC}"
     fi
     if [[ $LOCK_CONFLICT_COUNT -gt 0 ]]; then
-        echo -e "  - Directories with package-lock.json and yarn.lock: ${YELLOW}$LOCK_CONFLICT_COUNT${NC}"
+        printf '%s\n' "  - Directories with package-lock.json and yarn.lock: ${YELLOW}$LOCK_CONFLICT_COUNT${NC}"
     fi
-    echo -e "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}$absent_note"
+    printf '%s\n' "  - Files without $(packages_label): ${CYAN}$NOT_FOUND_COUNT${NC}$absent_note"
 
     local requests cache_hits oldest
     read -r requests cache_hits oldest <<< "$(awk '
@@ -2753,7 +2753,7 @@ print_results() {
     log INFO "Done ($complete): ${#RESULT_STATUS[@]} rows, $AFFECTED_COUNT affected, $FOUND_COUNT found, $NO_FILE_COUNT without file, $PARSE_ERROR_COUNT parse errors, $NOT_FOUND_COUNT without package; $cache_hits of $requests requests from the cache"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         echo ""
-        echo -e "${RED}${BOLD}Scanning NOT complete.${NC}"
+        printf '%s\n' "${RED}${BOLD}Scanning NOT complete.${NC}"
     fi
     echo ""
 }
