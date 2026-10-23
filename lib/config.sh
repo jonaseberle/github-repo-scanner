@@ -33,6 +33,8 @@ HIDE_ABSENT=0
 ALTERNATIVE_PATHS=""
 # --excludePaths: directories that --alternativePaths does not check.
 EXCLUDE_PATHS=""
+# 1 if --excludePaths was given: then nodeEngines does not set its default.
+EXCLUDE_PATHS_GIVEN=0
 REPO_FILTER=""
 SHOW_VISIBILITY=0
 # --hide-path: no path for a branch with only one found dependency file.

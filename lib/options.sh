@@ -91,6 +91,9 @@ ${BOLD}OPTIONS:${NC}
                         Optional, with --alternativePaths: do not check the
                         directories that match this extended regular
                         expression. Example: --excludePaths=node_modules
+                        Default with --type=nodeEngines: node_modules/ (each
+                        dependency there has a package.json). To check them
+                        too: --excludePaths='^$'
 
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
@@ -230,6 +233,7 @@ parse_args() {
                 ;;
             --excludePaths=*)
                 EXCLUDE_PATHS="${1#*=}"
+                EXCLUDE_PATHS_GIVEN=1
                 ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
