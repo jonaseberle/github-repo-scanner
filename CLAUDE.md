@@ -63,6 +63,7 @@ A bash script (`gh-dep-scanner.sh` with its modules in `lib/`) that scans GitHub
 10. **lib/versions.sh** - Packages of a dependency file (`jq`, `awk` for `yarn.lock`), versions and `--affected`
 11. **lib/scan.sh** - Iterates repos and branches, records the result rows
 12. **lib/table.sh** - Column widths, result table and summary
+13. **lib/output.sh** - The results as files: text, Markdown, HTML, PDF (headless Chromium)
 
 ## Key Functions
 
