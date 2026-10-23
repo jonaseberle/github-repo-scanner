@@ -28,6 +28,8 @@ ${BOLD}OPTIONS:${NC}
                           node          installed version from package-lock.json
                                         or yarn.lock
                           nodeJson      version constraint from package.json
+                          nodeEngines   Node versions: "engines" in package.json
+                                        (node, npm, yarn), .nvmrc, .node-version
 
     --packages[=regex]  Packages to search for: an extended regular expression
                         for the package names. Without a regex: all packages.

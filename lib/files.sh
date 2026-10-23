@@ -7,6 +7,7 @@ dep_file_names() {
         composer) echo "composer.lock" ;;
         composerJson) echo "composer.json" ;;
         node) echo "package-lock.json yarn.lock" ;;
+        nodeEngines) echo "package.json .nvmrc .node-version" ;;
         *) echo "package.json" ;;
     esac
 }

@@ -13,6 +13,7 @@ packages_label() {
 # Print all packages of a dependency file: "name<TAB>version", one per line.
 # A name that is listed twice (e.g. in require and require-dev) is printed once.
 # Fails if jq cannot parse the file, or if it is not a JSON object.
+# Arguments: content, type, path of the file (for nodeEngines).
 list_packages() {
     local content="$1"
     local dep_type="$2"
@@ -20,7 +21,14 @@ list_packages() {
     local object='if type != "object" then error("not an object") else . end | '
 
     {
-        if [[ "$dep_type" == "composer" ]]; then
+        if [[ "$dep_type" == "nodeEngines" && ( "${3:-}" == *.nvmrc || "${3:-}" == *.node-version ) ]]; then
+            # The Node version of nvm and similar tools: the first line that is
+            # not empty or a comment, e.g. "v16.18.0", "20" or "lts/iron".
+            echo "$content" | awk '{ sub(/#.*/, ""); gsub(/^[ \t\r]+|[ \t\r]+$/, "") } $0 != "" { print "node\t" $0; exit }'
+        elif [[ "$dep_type" == "nodeEngines" ]]; then
+            # package.json: the versions of node, npm, yarn etc. in "engines".
+            echo "$content" | jq -r "$object"'(.engines // {}) | if type == "object" then to_entries[] else empty end | "\(.key)\t\(.value | if type == "string" then . else tojson end)"' 2>/dev/null
+        elif [[ "$dep_type" == "composer" ]]; then
             # packages first, then packages-dev
             echo "$content" | jq -r "$object"'((.packages // []), (.["packages-dev"] // []))[] | "\(.name)\t\(.version)"' 2>/dev/null
         elif [[ "$dep_type" == "composerJson" ]]; then

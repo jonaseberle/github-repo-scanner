@@ -285,9 +285,9 @@ show_branch_column() {
 }
 
 # The PATH column shows where the file was found: with --alternativePaths, and
-# with --type=node, where a directory can have package-lock.json and yarn.lock.
+# with --type=node and nodeEngines, where a directory can have several files.
 show_path_column() {
-    [[ ( -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" ) && $PATHS_HIDDEN -eq 0 ]]
+    [[ ( -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" || "$TYPE" == "nodeEngines" ) && $PATHS_HIDDEN -eq 0 ]]
 }
 
 # True if row $1 is printed: --hide-unknown and --hide-absent hide rows.

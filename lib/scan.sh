@@ -75,7 +75,7 @@ record_file() {
     fi
 
     local listing packages name version
-    if ! listing=$(list_packages "$content" "$TYPE"); then
+    if ! listing=$(list_packages "$content" "$TYPE" "$3"); then
         record_result "$1" "$2" "$3" "$4" "" "PARSE_ERROR"
         return
     fi
@@ -206,14 +206,15 @@ scan_repos() {
                     continue
                 fi
                 found=$((found + 1))
-                if [[ $'\n'"$found_dirs" == *$'\n'"$dir"$'\n'* ]]; then
+                if [[ "$TYPE" == "node" && $'\n'"$found_dirs" == *$'\n'"$dir"$'\n'* ]]; then
                     LOCK_CONFLICT_COUNT=$((LOCK_CONFLICT_COUNT + 1))
                     print_warning_line "$OWNER/$repo_name ($target_branch), directory $dir: package-lock.json and yarn.lock. Use one package manager."
                     conflict_dirs+="$dir"$'\n'
                 fi
                 found_dirs+="$dir"$'\n'
-                # The PATH column: the lock file with --type=node (there can be two), else the directory.
-                if [[ "$TYPE" != "node" ]]; then
+                # The PATH column: the file with --type=node (there can be two lock
+                # files) and nodeEngines (package.json, .nvmrc), else the directory.
+                if [[ "$TYPE" != "node" && "$TYPE" != "nodeEngines" ]]; then
                     path="$dir"
                 fi
                 record_file "$repo_url" "$target_branch" "$path" "$visibility" "$content"

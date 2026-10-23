@@ -75,7 +75,7 @@ main() {
         missing=1
     fi
     if [[ -z "$TYPE" ]]; then
-        print_error "--type is required: composer, composerJson, node or nodeJson."
+        print_error "--type is required: composer, composerJson, node, nodeJson or nodeEngines."
         missing=1
     fi
     if [[ -z "$PACKAGES" ]]; then
@@ -91,8 +91,8 @@ main() {
     check_prerequisites
 
 
-    if [[ "$TYPE" != "composer" && "$TYPE" != "composerJson" && "$TYPE" != "node" && "$TYPE" != "nodeJson" ]]; then
-        print_error "Type must be 'composer', 'composerJson', 'node' or 'nodeJson'."
+    if [[ ! "$TYPE" =~ ^(composer|composerJson|node|nodeJson|nodeEngines)$ ]]; then
+        print_error "Type must be 'composer', 'composerJson', 'node', 'nodeJson' or 'nodeEngines'."
         exit 1
     fi
 
