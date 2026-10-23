@@ -83,6 +83,8 @@ Options (values only in the form --option=value):
                       regex, all branches. After the branch: "*" for the
                       default branch, else "(+3/-2)": 3 commits ahead of the
                       default branch, 2 behind
+  --hide-path         Optional: hide the path of a branch with only one found
+                      dependency file
   --hide-unknown      Optional: hide rows without a dependency file
   --hide-absent       Optional: also hide rows without a matching package
   --hide-merged       Optional, with --branches: hide branches that are fully
