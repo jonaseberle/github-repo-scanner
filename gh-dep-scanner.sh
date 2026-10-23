@@ -43,6 +43,10 @@ HIDE_ABSENT=0
 ALTERNATIVE_PATHS=""
 REPO_FILTER=""
 SHOW_VISIBILITY=0
+# --hide-path: no path for a branch with only one found dependency file.
+HIDE_PATH=0
+# Set by hide_single_paths: no row has a path left.
+PATHS_HIDDEN=0
 CACHE_DIR="./var/cache"
 # One lock per cache key while a process fetches it: others wait for it.
 LOCK_DIR="./var/lock"
@@ -180,6 +184,9 @@ ${BOLD}OPTIONS:${NC}
                         branch, and 2 commits of it that are not in the branch.
                         Examples: --branches='^feat/|^upgrade/'
                                   --branches=typo3 --branches='upgrade$'
+
+    --hide-path         Optional: hide the path of a branch with only one found
+                        dependency file
 
     --hide-unknown      Optional: hide the rows without a dependency file
                         (VERSION FILE NOT FOUND)
@@ -869,6 +876,9 @@ parse_args() {
                 ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
+                ;;
+            --hide-path)
+                HIDE_PATH=1
                 ;;
             --hide-merged)
                 HIDE_MERGED=1
@@ -2208,7 +2218,32 @@ show_branch_column() {
 # The PATH column shows where the file was found: with --alternativePaths, and
 # with --type=node, where a directory can have package-lock.json and yarn.lock.
 show_path_column() {
-    [[ -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" ]]
+    [[ ( -n "$ALTERNATIVE_PATHS" || "$TYPE" == "node" ) && $PATHS_HIDDEN -eq 0 ]]
+}
+
+# --hide-path: clear the path of the rows of each branch with only one
+# found dependency file. Without any path left, the PATH column goes.
+hide_single_paths() {
+    if [[ $HIDE_PATH -eq 0 ]]; then
+        return 0
+    fi
+    local i
+    # One awk for all rows: bash 3.2 has no associative arrays.
+    # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
+    while IFS= read -r i; do
+        RESULT_PATHS[i]=""
+    done < <(for i in "${!RESULT_STATUS[@]}"; do
+            printf '%s\t%s\t%s\t%s\n' "$i" "${RESULT_URLS[$i]}" "${RESULT_BRANCHES[$i]}" "${RESULT_PATHS[$i]}"
+        done | awk -F '\t' '
+            $4 != "" { row[NR] = $1; key[NR] = $2 "\t" $3; if (!seen[$2 "\t" $3 "\t" $4]++) paths[$2 "\t" $3]++ }
+            END { for (n in row) if (paths[key[n]] == 1) print row[n] }')
+    PATHS_HIDDEN=1
+    for i in "${!RESULT_STATUS[@]}"; do
+        if [[ -n "${RESULT_PATHS[$i]}" ]]; then
+            PATHS_HIDDEN=0
+            break
+        fi
+    done
 }
 
 # Set BRANCH_LABEL to branch $1 with its status $2: "main *" for the default
@@ -2363,6 +2398,7 @@ print_results() {
     echo ""
 
     # Print header
+    hide_single_paths
     set_column_widths
     print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY"
     print_row "" "--------" "------" "" "----" "-------" "-------" "----------"
@@ -2616,7 +2652,7 @@ main() {
         print_info "$(rate_limit_summary)"
     fi
 
-    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE offline=$OFFLINE delay=$DELAY"
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS cache=$USE_CACHE offline=$OFFLINE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"
