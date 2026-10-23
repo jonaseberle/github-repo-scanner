@@ -696,13 +696,6 @@ print_results() {
     else
         echo "  - Requests served from the cache: 0 of $requests"
     fi
-    if [[ $OFFLINE -eq 0 ]]; then
-        # The copy for --html uses the state of the terminal output.
-        if [[ $REPORT_ONLY -eq 0 ]]; then
-            check_rate_limit
-        fi
-        echo "  - $(rate_limit_summary)"
-    fi
     local complete="complete"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         complete="NOT complete"

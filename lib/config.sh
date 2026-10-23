@@ -53,7 +53,7 @@ REPORT_COLUMNS=160
 OUTPUT_DIR="./output"
 # An --output-* option without a file: write_outputs names it.
 OUTPUT_DEFAULT=":default"
-# 1 while print_results renders a copy for the files: no requests, no log line.
+# 1 while print_results renders a copy for the files: no log line.
 REPORT_ONLY=0
 # The command line options, for the files.
 SCAN_ARGUMENTS=""

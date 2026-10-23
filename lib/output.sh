@@ -3,8 +3,7 @@
 # --output-md, --output-html, --output-pdf).
 
 # Write the files of the --output-* options. They show the results of
-# print_results for REPORT_COLUMNS columns. A copy: no rate limit request,
-# no log line.
+# print_results for REPORT_COLUMNS columns. A copy: no log line.
 write_outputs() {
     if [[ -z "$OUTPUT_TEXT$OUTPUT_MD$OUTPUT_HTML$OUTPUT_PDF" ]]; then
         return 0
