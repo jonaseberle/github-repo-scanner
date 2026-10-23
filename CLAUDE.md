@@ -59,9 +59,10 @@ A bash script (`gh-dep-scanner.sh` with its modules in `lib/`) that scans GitHub
 6. **lib/repos.sh** - REST repository list, updated from the cache by push and update time
 7. **lib/branches.sh** - Branches with their status (ahead/behind the default branch)
 8. **lib/files.sh** - Dependency files by commit, file lists, GraphQL prefetch
-9. **lib/versions.sh** - Packages of a dependency file (`jq`, `awk` for `yarn.lock`), versions and `--affected`
-10. **lib/scan.sh** - Iterates repos and branches, records the result rows
-11. **lib/table.sh** - Column widths, result table and summary
+9. **lib/ranges.sh** - Version ranges in npm and Composer syntax as intervals, their overlap
+10. **lib/versions.sh** - Packages of a dependency file (`jq`, `awk` for `yarn.lock`), versions and `--affected`
+11. **lib/scan.sh** - Iterates repos and branches, records the result rows
+12. **lib/table.sh** - Column widths, result table and summary
 
 ## Key Functions
 
@@ -70,8 +71,8 @@ A bash script (`gh-dep-scanner.sh` with its modules in `lib/`) that scans GitHub
 - `fetch_dependency_file()` - Returns the file content of a commit or `NOT_FOUND`/`PARSE_ERROR`
 - `prefetch_dependency_files()` - Fills the cache with the root dependency files of 20 repos per GraphQL request
 - `list_packages()` - Prints `name<TAB>version` for all packages of a dependency file
-- `parse_version()` - Sets `VERSION` to major, minor, patch of a constraint (`^`, `~`, `>=`, OR constraints, etc.)
-- `is_affected()` - Checks a version against the `--affected` ranges
+- `range_parse()` - Sets `RANGE_*` to the intervals of a constraint, in npm or Composer syntax
+- `is_affected()` - Checks if a version or constraint overlaps the `--affected` ranges
 
 ## Commit Guidelines
 
