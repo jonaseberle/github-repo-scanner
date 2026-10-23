@@ -2186,10 +2186,10 @@ set_column_widths() {
         if [[ ${#RESULT_VERSIONS[$i]} -gt $version_width ]]; then
             version_width=${#RESULT_VERSIONS[$i]}
         fi
-        # The " !" of a lock file conflict (see print_row).
+        # The "!" of a lock file conflict (see print_row).
         width=${#RESULT_PATHS[$i]}
         if [[ ${RESULT_LOCK_CONFLICT[$i]} -eq 1 ]]; then
-            width=$((width + 2))
+            width=$((width + 1))
         fi
         if show_path_column && [[ $width -gt $path_width ]]; then
             path_width=$width
@@ -2379,9 +2379,9 @@ print_row() {
     elif show_branch_column; then
         branch_lines=("$branch")
     fi
-    # Before the width checks: set_column_widths counts the " !" too.
+    # Before the width checks: set_column_widths counts the "!" too.
     if [[ $lock_conflict -eq 1 ]]; then
-        path+=" !"
+        path+="!"
     fi
     # A cell that fits needs no wrap: no subshell for most rows.
     if ! show_path_column; then
@@ -2434,9 +2434,9 @@ print_row() {
         if show_path_column; then
             printf -v cell "%-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
             # Pad first, then color the "!": the color codes have no width.
-            if [[ $lock_conflict -eq 1 && "${path_lines[$i]:-}" == *" !" && $((i + 1)) -eq ${#path_lines[@]} ]]; then
-                local text="${path_lines[$i]% !}"
-                cell="$text $YELLOW!$NC$path_color${cell:$((${#text} + 2))}"
+            if [[ $lock_conflict -eq 1 && "${path_lines[$i]:-}" == *"!" && $((i + 1)) -eq ${#path_lines[@]} ]]; then
+                local text="${path_lines[$i]%!}"
+                cell="$text$YELLOW!$NC$path_color${cell:$((${#text} + 1))}"
             fi
             row+=" $path_color$cell$NC"
         fi
