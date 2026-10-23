@@ -116,10 +116,11 @@ mark_lock_conflicts() {
 # --filename-match: if no row of this branch from number $1 on has a version
 # and a file of commit $3 of repository $2 matches, the rows get the status
 # "replaced" (not shown, not counted), and one FILENAME MATCH row replaces
-# them: the first matching path and the number of files.
+# them: the first matching path up to the end of the match (typo3conf/ENABLE_INSTALL_TOOL
+# with "typo3conf/" gives typo3conf/), and the number of files.
 # $4..$6: URL, branch and visibility of the row.
 filename_fallback() {
-    local i matches count
+    local i matches count first
     for ((i = $1; i < ${#RESULT_STATUS[@]}; i++)); do
         case "${RESULT_STATUS[$i]}" in
             affected | not_affected | unchecked | found) return 0 ;;
@@ -139,7 +140,11 @@ filename_fallback() {
         esac
         RESULT_STATUS[i]="replaced"
     done
-    record_result "$4" "$5" "${matches%%$'\n'*}" "$6" "" "FILENAME_MATCH:$count"
+    first="${matches%%$'\n'*}"
+    if [[ "$first" =~ $FILENAME_MATCH ]]; then
+        first="${first%%"${BASH_REMATCH[0]}"*}${BASH_REMATCH[0]}"
+    fi
+    record_result "$4" "$5" "$first" "$6" "" "FILENAME_MATCH:$count"
 }
 
 # With nodeEngines: for each package.json row from number $1 on, find the
