@@ -36,7 +36,8 @@ write_outputs() {
 }
 
 # Put the file of the variable $1 below OUTPUT_DIR if its path is relative,
-# and create its directory. An absolute path stays. Without a file name, the
+# and create its directory. An absolute path stays. An existing file gets a
+# number: a-1.pdf, a-2.pdf. Without a file name, the
 # name comes from the owner (and repository) and --packages, with the
 # extension $2: "^typo3/cms-core$" gives dmind-gmbh_typo3-cms-core.pdf.
 output_path() {
@@ -57,6 +58,15 @@ output_path() {
     fi
     # Short option: BSD mkdir (macOS) has no --parents.
     mkdir -p "$(dirname "$path")"
+    # Do not overwrite a file: a.pdf, then a-1.pdf, a-2.pdf.
+    local base="$path" extension="" number=1 file="${path##*/}"
+    if [[ "$file" == ?*.* ]]; then
+        base="${path%.*}" extension=".${path##*.}"
+    fi
+    while [[ -e "$path" ]]; do
+        path="$base-$number$extension"
+        number=$((number + 1))
+    done
     printf -v "$1" '%s' "$path"
 }
 

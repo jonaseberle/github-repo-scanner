@@ -108,7 +108,8 @@ ${BOLD}OPTIONS:${NC}
                         headless Chromium or Google Chrome; set CHROMIUM=<path>
                         for another one). A relative path is below ./output.
                         Without a file: <owner>_<packages>.<txt|md|html|pdf>,
-                        e.g. ./output/dmind-gmbh_typo3-cms-core.pdf
+                        e.g. ./output/dmind-gmbh_typo3-cms-core.pdf. An
+                        existing file stays: the new one is e.g. ...-1.pdf.
 
     --offline           Optional: use the cached repository list and do not
                         check for pushes. Once cached, a scan needs no network.
