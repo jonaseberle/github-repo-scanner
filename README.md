@@ -86,6 +86,10 @@ Options (values only in the form --option=value):
                       Optional: also check the directories that match this
                       extended regular expression (one row per dependency
                       file); without a regex, all directories
+  --excludePaths=<regex>
+                      Optional, with --alternativePaths: do not check the
+                      directories that match this extended regular
+                      expression, e.g. --excludePaths=node_modules
   --show-visibility   Optional: add a column with the repo visibility
   --offline           Optional: use the cached repository list and do not check
                       for pushes (a cached scan then needs no network)
