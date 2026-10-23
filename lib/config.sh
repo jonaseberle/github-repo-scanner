@@ -47,6 +47,8 @@ OUTPUT_MD=""
 OUTPUT_HTML=""
 OUTPUT_PDF=""
 REPORT_COLUMNS=160
+# A relative --output-* path is below this directory, like ./var.
+OUTPUT_DIR="./output"
 # 1 while print_results renders a copy for the files: no requests, no log line.
 REPORT_ONLY=0
 # The command line options, for the files.

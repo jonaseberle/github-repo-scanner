@@ -106,7 +106,7 @@ ${BOLD}OPTIONS:${NC}
                         columns wide: plain text, Markdown tables, HTML (white
                         page with the colors) or PDF (that HTML, printed by a
                         headless Chromium or Google Chrome; set CHROMIUM=<path>
-                        for another one)
+                        for another one). A relative path is below ./output.
 
     --offline           Optional: use the cached repository list and do not
                         check for pushes. Once cached, a scan needs no network.

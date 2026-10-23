@@ -8,3 +8,6 @@
 
 # Cache of GitHub requests
 /var/
+
+# Files of --output-text, --output-md, --output-html and --output-pdf
+/output/

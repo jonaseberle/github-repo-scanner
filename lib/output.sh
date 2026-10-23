@@ -9,6 +9,10 @@ write_outputs() {
     if [[ -z "$OUTPUT_TEXT$OUTPUT_MD$OUTPUT_HTML$OUTPUT_PDF" ]]; then
         return 0
     fi
+    output_path OUTPUT_TEXT
+    output_path OUTPUT_MD
+    output_path OUTPUT_HTML
+    output_path OUTPUT_PDF
     local body
     body=$(TERM_COLUMNS=$REPORT_COLUMNS REPORT_ONLY=1 print_results)
     if [[ -n "$OUTPUT_TEXT" ]]; then
@@ -29,6 +33,21 @@ write_outputs() {
     if [[ -n "$OUTPUT_PDF" ]]; then
         write_pdf "$body"
     fi
+}
+
+# Put the file of the variable $1 below OUTPUT_DIR if its path is relative,
+# and create its directory. An absolute path stays.
+output_path() {
+    local path="${!1}"
+    if [[ -z "$path" ]]; then
+        return 0
+    fi
+    if [[ "$path" != /* ]]; then
+        path="$OUTPUT_DIR/$path"
+    fi
+    # Short option: BSD mkdir (macOS) has no --parents.
+    mkdir -p "$(dirname "$path")"
+    printf -v "$1" '%s' "$path"
 }
 
 strip_colors() {
