@@ -89,9 +89,9 @@ set_column_widths() {
         if [[ ${#RESULT_VERSIONS[$i]} -gt $version_width ]]; then
             version_width=${#RESULT_VERSIONS[$i]}
         fi
-        # The "!" of a lock file conflict (see print_row).
+        # The "!" of a conflict (see print_row).
         width=${#RESULT_PATHS[$i]}
-        if [[ ${RESULT_LOCK_CONFLICT[$i]} -eq 1 ]]; then
+        if [[ ${RESULT_CONFLICT[$i]} -eq 1 ]]; then
             width=$((width + 1))
         fi
         if show_path_column && [[ $width -gt $path_width ]]; then
@@ -161,7 +161,7 @@ fit_columns() {
         local path="" label=""
         if show_path_column; then
             path="${RESULT_PATHS[$i]}"
-            if [[ ${RESULT_LOCK_CONFLICT[$i]} -eq 1 ]]; then
+            if [[ ${RESULT_CONFLICT[$i]} -eq 1 ]]; then
                 path+="!"
             fi
         fi
@@ -341,7 +341,7 @@ branch_label() {
 
 # Arguments: color, URL, branch, branch status (see branch_label), path, package, version,
 # visibility, and optionally the color of the version, a mark for the end
-# of the row and 1 for a lock file conflict (a yellow "!" after the path).
+# of the row and 1 for a conflict (a yellow "!" after the path).
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
@@ -350,7 +350,7 @@ branch_label() {
 # or further left if the line is too short.
 print_row() {
     local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
-    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" lock_conflict="${11:-0}"
+    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}"
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
@@ -405,7 +405,7 @@ print_row() {
         branch_lines=("$branch")
     fi
     # Before the width checks: set_column_widths counts the "!" too.
-    if [[ $lock_conflict -eq 1 ]]; then
+    if [[ $conflict -eq 1 ]]; then
         path+="!"
     fi
     # A cell that fits needs no wrap: no subshell for most rows.
@@ -462,7 +462,7 @@ print_row() {
         if show_path_column && ! [[ $spill -eq 1 && $i -eq 0 ]]; then
             printf -v cell "%-*s" "$PATH_COLUMN_WIDTH" "${path_lines[$i]:-}"
             # Pad first, then color the "!": the color codes have no width.
-            if [[ $lock_conflict -eq 1 && "${path_lines[$i]:-}" == *"!" && $((i + 1)) -eq ${#path_lines[@]} ]]; then
+            if [[ $conflict -eq 1 && "${path_lines[$i]:-}" == *"!" && $((i + 1)) -eq ${#path_lines[@]} ]]; then
                 local text="${path_lines[$i]%!}"
                 cell="$text$YELLOW!$NC$path_color${cell:$((${#text} + 1))}"
             fi
@@ -549,7 +549,7 @@ print_results() {
         local path="${RESULT_PATHS[$i]}"
         local branch="${RESULT_BRANCHES[$i]}"
         local branch_status="${RESULT_BRANCH_STATUS[$i]}"
-        local lock_conflict="${RESULT_LOCK_CONFLICT[$i]}"
+        local conflict="${RESULT_CONFLICT[$i]}"
         local package="${RESULT_PACKAGES[$i]}"
 
         case "$status" in
@@ -567,21 +567,21 @@ print_results() {
         # With --affected, the color of the version and a "*" at the end show
         # whether it is affected. Not affected rows do not count as results.
         if [[ "$status" == "affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$lock_conflict"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$conflict"
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$lock_conflict"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$conflict"
         elif [[ "$status" == "unchecked" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$lock_conflict"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$conflict"
             has_results=1
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$lock_conflict"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$lock_conflict"
+            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$lock_conflict"
+            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
             has_results=1
         fi
     done
@@ -649,6 +649,9 @@ print_results() {
     printf '%s\n' "  - $rows without $dep_file_name: ${YELLOW}$NO_FILE_COUNT${NC}$unknown_note"
     if [[ $PARSE_ERROR_COUNT -gt 0 ]]; then
         printf '%s\n' "  - Dependency files that are not valid JSON: ${YELLOW}$PARSE_ERROR_COUNT${NC}"
+    fi
+    if [[ $NODE_VERSION_CONFLICT_COUNT -gt 0 ]]; then
+        printf '%s\n' "  - package.json with a .nvmrc or .node-version outside its \"engines\": ${YELLOW}$NODE_VERSION_CONFLICT_COUNT${NC}"
     fi
     if [[ $LOCK_CONFLICT_COUNT -gt 0 ]]; then
         printf '%s\n' "  - Directories with package-lock.json and yarn.lock: ${YELLOW}$LOCK_CONFLICT_COUNT${NC}"

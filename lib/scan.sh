@@ -58,7 +58,7 @@ record_result() {
     RESULT_BRANCHES+=("$2")
     RESULT_BRANCH_STATUS+=("$CURRENT_BRANCH_STATUS")
     RESULT_PATHS+=("$3")
-    RESULT_LOCK_CONFLICT+=(0)
+    RESULT_CONFLICT+=(0)
     RESULT_VISIBILITY+=("$4")
     RESULT_PACKAGES+=("$5")
     RESULT_VERSIONS+=("$version_str")
@@ -89,7 +89,7 @@ record_file() {
     done <<< "$packages"
 }
 
-# Set RESULT_LOCK_CONFLICT for the rows from number $1 on whose path is in
+# Set RESULT_CONFLICT for the rows from number $1 on whose path is in
 # one of the directories $2 (one per line).
 mark_lock_conflicts() {
     local i dir
@@ -99,7 +99,49 @@ mark_lock_conflicts() {
             dir="${RESULT_PATHS[$i]%/*}"
         fi
         if [[ $'\n'"$2" == *$'\n'"$dir"$'\n'* ]]; then
-            RESULT_LOCK_CONFLICT[i]=1
+            RESULT_CONFLICT[i]=1
+        fi
+    done
+}
+
+# With nodeEngines: for each package.json row from number $1 on, find the
+# .nvmrc or .node-version that nvm uses there: the nearest one in its
+# directory or above (.nvmrc first). Mark both rows if its Node version is
+# outside "engines.node". $2, $3: repository and branch, for the warning.
+check_node_versions() {
+    local i j dir best best_dir file candidate
+    for ((j = $1; j < ${#RESULT_STATUS[@]}; j++)); do
+        if [[ "${RESULT_PACKAGES[$j]}" != "node" || "${RESULT_PATHS[$j]##*/}" != "package.json" ]]; then
+            continue
+        fi
+        dir="${RESULT_PATHS[$j]%package.json}"
+        best="" best_dir=""
+        for ((i = $1; i < ${#RESULT_STATUS[@]}; i++)); do
+            file="${RESULT_PATHS[$i]##*/}"
+            if [[ "${RESULT_PACKAGES[$i]}" != "node" || ( "$file" != ".nvmrc" && "$file" != ".node-version" ) ]]; then
+                continue
+            fi
+            candidate="${RESULT_PATHS[$i]%"$file"}"
+            # In the directory of package.json or above it.
+            if [[ "$dir" != "$candidate"* ]]; then
+                continue
+            fi
+            if [[ -z "$best" || ${#candidate} -gt ${#best_dir} || ( "$candidate" == "$best_dir" && "$file" == ".nvmrc" ) ]]; then
+                best=$i best_dir="$candidate"
+            fi
+        done
+        if [[ -z "$best" ]]; then
+            continue
+        fi
+        # A value that is no version range (e.g. "lts/*") is not checked.
+        range_parse "${RESULT_VERSIONS[$j]}" npm || continue
+        range_keep other
+        range_parse "${RESULT_VERSIONS[$best]}" npm || continue
+        if ! range_overlaps other; then
+            RESULT_CONFLICT[best]=1
+            RESULT_CONFLICT[j]=1
+            NODE_VERSION_CONFLICT_COUNT=$((NODE_VERSION_CONFLICT_COUNT + 1))
+            print_warning_line "$OWNER/$2 ($3): ${RESULT_PATHS[$best]} has Node ${RESULT_VERSIONS[$best]}, outside \"engines\" ${RESULT_VERSIONS[$j]} of ${RESULT_PATHS[$j]}."
         fi
     done
 }
@@ -222,6 +264,9 @@ scan_repos() {
             # The row of the first lock file is recorded before the second one is found.
             if [[ -n "$conflict_dirs" ]]; then
                 mark_lock_conflicts "$first_row" "$conflict_dirs"
+            fi
+            if [[ "$TYPE" == "nodeEngines" ]]; then
+                check_node_versions "$first_row" "$repo_name" "$target_branch"
             fi
             if [[ $found -eq 0 ]]; then
                 record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"

@@ -83,8 +83,9 @@ declare -a RESULT_URLS=()
 declare -a RESULT_VERSIONS=()
 declare -a RESULT_VISIBILITY=()
 declare -a RESULT_PATHS=()
-# 1: the directory of the path has package-lock.json and yarn.lock.
-declare -a RESULT_LOCK_CONFLICT=()
+# 1: a conflict in the directory of the path (a yellow "!"): package-lock.json
+# and yarn.lock, or a .nvmrc outside the "engines" of package.json.
+declare -a RESULT_CONFLICT=()
 declare -a RESULT_BRANCHES=()
 # With --branches: "ahead/behind", the commits of the branch that are not in
 # the default branch, and the other way round. "default" for the default
@@ -109,6 +110,8 @@ NO_BRANCH_COUNT=0
 MERGED_COUNT=0
 # Directories with package-lock.json and yarn.lock.
 LOCK_CONFLICT_COUNT=0
+# package.json files whose .nvmrc or .node-version is outside their "engines.node".
+NODE_VERSION_CONFLICT_COUNT=0
 FILTERED_OUT_COUNT=0
 REFRESHED_COUNT=0
 # Stays empty for a single repository.
