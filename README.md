@@ -20,7 +20,6 @@ This script fills that gap.
 - Supports **Composer** (PHP) and **Node** (JavaScript) dependencies
 - Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type=composerJson`)
 - Reads the installed Node version from `package-lock.json` or `yarn.lock` (or the constraint from `package.json` with `--type=nodeJson`)
-- Interactive mode or CLI flags for automation
 - Rate limiting to avoid GitHub API limits
 - Caches every GitHub request in `./var/cache`, so a second scan needs no network
 - Colored output with progress indicator
@@ -43,21 +42,6 @@ gh auth login
 ```
 
 ## Usage
-
-### Interactive Mode
-
-Simply run the script without arguments:
-
-```bash
-./gh-dep-scanner.sh
-```
-
-You'll be prompted for:
-1. GitHub URL (org, personal or a single repository)
-2. Dependency type (composer/node/composerJson/nodeJson)
-3. Packages (regular expression; Enter for all)
-4. Affected version ranges (optional)
-5. Branch (optional)
 
 ### CLI Flags
 

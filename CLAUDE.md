@@ -37,10 +37,7 @@ A single-file bash script (`gh-dep-scanner.sh`) that scans GitHub repositories (
 ## Running the Script
 
 ```bash
-# Interactive mode
-./gh-dep-scanner.sh
-
-# With CLI flags
+# Scan
 ./gh-dep-scanner.sh --url="https://github.com/orgs/ORG_NAME/repositories" \
                     --type=composer \
                     --packages='^livewire/livewire$' \
@@ -57,14 +54,13 @@ The script is organized into sections marked by comment blocks:
 1. **HELPER FUNCTIONS** - Color output utilities (`print_error`, `print_success`, etc.)
 2. **PREREQUISITES CHECK** - Verifies `gh` and `jq` are installed
 3. **ARGUMENT PARSING** - Options in the form `--option=value` only (see `--help`)
-4. **INTERACTIVE MODE** - Prompts user for missing required inputs
-5. **URL PARSING** - Extracts owner/org from various GitHub URL formats
-6. **REPOSITORY FETCHING** - REST repository list, updated from the cache by push and update time
-7. **DEPENDENCY FILE FETCHING** - Fetches the dependency files by commit (batched with GraphQL for the root files)
-8. **VERSION EXTRACTION** - Lists the packages of a dependency file (`jq`, `awk` for `yarn.lock`)
-9. **VERSION COMPARISON** - Parses constraints to major, minor, patch and checks the `--affected` ranges
-10. **MAIN SCANNING LOGIC** - Iterates repos and branches
-11. **OUTPUT** - Colored table output with summary
+4. **URL PARSING** - Extracts owner/org from various GitHub URL formats
+5. **REPOSITORY FETCHING** - REST repository list, updated from the cache by push and update time
+6. **DEPENDENCY FILE FETCHING** - Fetches the dependency files by commit (batched with GraphQL for the root files)
+7. **VERSION EXTRACTION** - Lists the packages of a dependency file (`jq`, `awk` for `yarn.lock`)
+8. **VERSION COMPARISON** - Parses constraints to major, minor, patch and checks the `--affected` ranges
+9. **MAIN SCANNING LOGIC** - Iterates repos and branches
+10. **OUTPUT** - Colored table output with summary
 
 ## Key Functions
 
