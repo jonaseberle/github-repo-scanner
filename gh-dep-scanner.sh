@@ -272,16 +272,18 @@ init_log() {
 }
 
 # Arguments: severity (DEBUG, INFO, WARN, ERROR), message.
-# One line per message: timestamp, process id, severity, message.
+# One line per message: time (UTC), process id, severity, message.
 log() {
     local severity="$1"
     shift
     local message="$*"
     message="${message//$'\n'/ }"
     if [[ $LOG_TIME_BUILTIN -eq 1 ]]; then
-        printf -v LOG_TIME '%(%Y-%m-%dT%H:%M:%S%z)T' -1
+        # A TZ for this command only: "local TZ" does not change the time zone.
+        TZ=UTC printf -v LOG_TIME '%(%Y-%m-%dT%H:%M:%S)T' -1
     elif [[ $SECONDS -ne $LOG_TIME_SECOND ]]; then
-        LOG_TIME=$(date '+%Y-%m-%dT%H:%M:%S%z')
+        # Short option: BSD date (macOS) has no --utc.
+        LOG_TIME=$(date -u '+%Y-%m-%dT%H:%M:%S')
         LOG_TIME_SECOND=$SECONDS
     fi
     printf '%s [%s] %-5s %s\n' "$LOG_TIME" "$$" "$severity" "$message" >> "$LOG_FILE"
