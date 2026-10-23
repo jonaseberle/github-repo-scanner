@@ -113,26 +113,32 @@ mark_lock_conflicts() {
     done
 }
 
-# --filename-match: if no row of this branch from number $1 on has a version
-# and a file of commit $3 of repository $2 matches, the rows get the status
-# "replaced" (not shown, not counted), and one FILENAME MATCH row replaces
-# them: the first matching path up to the end of the match (typo3conf/ENABLE_INSTALL_TOOL
-# with "typo3conf/" gives typo3conf/), and the number of files.
-# $4..$6: URL, branch and visibility of the row.
-filename_fallback() {
-    local i matches count first
+# True if a row from number $1 on has a version (FOUND).
+rows_have_version() {
+    local i
     for ((i = $1; i < ${#RESULT_STATUS[@]}; i++)); do
         case "${RESULT_STATUS[$i]}" in
             affected | not_affected | unchecked | found) return 0 ;;
         esac
     done
+    return 1
+}
+
+# --filename-match, for a repository without a version: if a file of commit
+# $4 of repository $3 matches, the rows of the branch from number $1 to $2
+# (excluded) get the status "replaced" (not shown, not counted), and one
+# FILENAME MATCH row replaces them: the first matching path up to the end of
+# the match (typo3conf/ENABLE_INSTALL_TOOL with "typo3conf/" gives
+# typo3conf/), and the number of files. $5..$7: URL, branch and visibility.
+filename_fallback() {
+    local i matches count path
     # An assignment of its own: an error of filename_matches must stop the scan.
-    matches=$(filename_matches "$2" "$3")
+    matches=$(filename_matches "$3" "$4")
     if [[ -z "$matches" ]]; then
         return 0
     fi
     count=$(printf '%s\n' "$matches" | awk 'END { print NR }')
-    for ((i = $1; i < ${#RESULT_STATUS[@]}; i++)); do
+    for ((i = $1; i < $2; i++)); do
         case "${RESULT_STATUS[$i]}" in
             no_file) NO_FILE_COUNT=$((NO_FILE_COUNT - 1)) ;;
             not_in_file) NOT_FOUND_COUNT=$((NOT_FOUND_COUNT - 1)) ;;
@@ -140,11 +146,11 @@ filename_fallback() {
         esac
         RESULT_STATUS[i]="replaced"
     done
-    first="${matches%%$'\n'*}"
-    if [[ "$first" =~ $FILENAME_MATCH ]]; then
-        first="${first%%"${BASH_REMATCH[0]}"*}${BASH_REMATCH[0]}"
+    path="${matches%%$'\n'*}"
+    if [[ "$path" =~ $FILENAME_MATCH ]]; then
+        path="${path%%"${BASH_REMATCH[0]}"*}${BASH_REMATCH[0]}"
     fi
-    record_result "$4" "$5" "$first" "$6" "" "FILENAME_MATCH:$count"
+    record_result "$5" "$6" "$path" "$7" "" "FILENAME_MATCH:$count"
 }
 
 # With nodeEngines: for each package.json row from number $1 on, find the
@@ -244,6 +250,7 @@ scan_repos() {
 
         # One line per branch: "name<TAB>commit<TAB>branch status".
         collect_candidates "$repo_name" "$branches"
+        local repo_first_row=${#RESULT_STATUS[@]} fallback_branches=""
         prefetch_repo_files "$repo_name" "$branches"
         local branch_count branch_number=0 commit
         branch_count=$(echo "$branches" | awk 'NF > 0 { n++ } END { print n + 0 }')
@@ -316,10 +323,22 @@ scan_repos() {
             if [[ $found -eq 0 && -n "$PACKAGES" ]]; then
                 record_file "$repo_url" "$target_branch" "" "$visibility" "NOT_FOUND"
             fi
-            if [[ -n "$FILENAME_MATCH" ]]; then
-                filename_fallback "$first_row" "$repo_name" "$commit" "$repo_url" "$target_branch" "$visibility"
-            fi
+            # The rows of this branch, for --filename-match after the last branch.
+            # "-": no branch status. Not an empty field: read joins adjacent tabs.
+            fallback_branches+="$first_row"$'\t'"${#RESULT_STATUS[@]}"$'\t'"$commit"$'\t'"${CURRENT_BRANCH_STATUS:--}"$'\t'"$target_branch"$'\n'
         done <<< "$branches"
+
+        # --filename-match: only for a repository without a version in any branch.
+        if [[ -n "$FILENAME_MATCH" ]] && ! rows_have_version "$repo_first_row"; then
+            local fallback_first fallback_end fallback_commit fallback_status fallback_branch
+            while IFS=$'\t' read -r fallback_first fallback_end fallback_commit fallback_status fallback_branch; do
+                if [[ -n "$fallback_commit" ]]; then
+                    # record_result takes the branch status from here.
+                    CURRENT_BRANCH_STATUS="${fallback_status#-}"
+                    filename_fallback "$fallback_first" "$fallback_end" "$repo_name" "$fallback_commit" "$repo_url" "$fallback_branch" "$visibility"
+                fi
+            done <<< "$fallback_branches"
+        fi
 
     # The default branch last: it can be empty ("gh repo view" of an empty
     # repository), and read joins adjacent tabs.
