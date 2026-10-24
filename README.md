@@ -91,7 +91,7 @@ Options (values only in the form --option=value):
                       in any scanned branch: if a file path matches this
                       extended regular expression, one row in FILENAME MATCH
                       replaces the rows of a branch; works without
-                      --packages too, e.g. --filename-match='typo3conf/'
+                      --packages too, e.g. --filename-match='(^|/)wp-content/'
   --excludePaths=<regex>
                       Optional, with --alternativePaths: do not check the
                       directories that match this extended regular
@@ -248,14 +248,14 @@ Options (values only in the form --option=value):
   --alternativePaths
 ```
 
-### Find TYPO3 projects with and without Composer
+### Find WordPress projects
+
+Without `--packages`, only the file names are checked:
 
 ```bash
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
-  --type=composer \
-  --packages='^typo3/cms-core$' \
-  --filename-match='typo3conf/'
+  --filename-match='(^|/)wp-content/'
 ```
 
 ### Show the visibility of each repository
