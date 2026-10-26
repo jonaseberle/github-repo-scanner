@@ -313,6 +313,15 @@ Each run logs its GitHub requests and its steps to `./var/log/gh-dep-scanner.log
 
 ## Sample Output
 
+```bash
+./gh-dep-scanner.sh \
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --type=composer \
+  --packages='^typo3/cms-core$' \
+  --affected='<13' \
+  --group-by-affected
+```
+
 ```
 Scanning YOUR_ORG repositories for packages matching ^typo3/cms-core$, affected: <13...
 Branch: default
@@ -323,10 +332,12 @@ Results: packages matching ^typo3/cms-core$ in repositories (affected: <13)
 REPO URL                                   PACKAGE        VERSION
 --------                                   -------        -------
 
-FOUND
+AFFECTED
 https://github.com/YOUR_ORG/client-portal  typo3/cms-core v12.4.45 *
-https://github.com/YOUR_ORG/project-alpha  typo3/cms-core v13.4.36
 https://github.com/YOUR_ORG/shop-backend   typo3/cms-core v11.5.41 *
+
+NOT AFFECTED
+https://github.com/YOUR_ORG/project-alpha  typo3/cms-core v13.4.36
 
 PACKAGE NOT FOUND
 https://github.com/YOUR_ORG/time-tracker                  Not found
