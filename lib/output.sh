@@ -73,7 +73,7 @@ output_path() {
 # Print the command line of the scan below a divider, as the summary.
 command_section() {
     echo ""
-    echo "================================================================================"
+    TERM_COLUMNS=$REPORT_COLUMNS print_divider
     echo "${1:-}Command line:${2:-}"
     printf '  %s %s\n' "$0" "$SCAN_ARGUMENTS"
 }

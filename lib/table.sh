@@ -533,7 +533,18 @@ ordered_rows() {
 
 }
 
+# Print a line of "=" over the full width.
+print_divider() {
+    local line
+    printf -v line '%*s' "$TERM_COLUMNS" ""
+    printf '%s\n' "${line// /=}"
+}
+
 print_results() {
+    # The terminal can change its size during a long scan.
+    if [[ $REPORT_ONLY -eq 0 ]]; then
+        TERM_COLUMNS=$(tput cols 2>/dev/null || echo "$TERM_COLUMNS")
+    fi
     local dep_file_name no_file_group
     dep_file_name=$(dep_file_names)
     no_file_group="VERSION FILE NOT FOUND (${dep_file_name// /, })"
@@ -541,7 +552,7 @@ print_results() {
 
     echo ""
     printf '%s\n' "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${AFFECTED:+ (affected: ${COLOR_VERSION}$AFFECTED${NC})}"
-    echo "================================================================================"
+    print_divider
     echo ""
 
     # Print header
@@ -625,7 +636,7 @@ print_results() {
 
     # Summary
     echo ""
-    echo "================================================================================"
+    print_divider
     printf '%s\n' "${BOLD}Summary:${NC}"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         echo "  - Total repos scanned: $((SCAN_POSITION - 1)) of $TOTAL_REPOS (stopped in repo $SCAN_POSITION)"
