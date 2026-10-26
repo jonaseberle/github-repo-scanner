@@ -16,8 +16,9 @@ write_outputs() {
     body=$(TERM_COLUMNS=$REPORT_COLUMNS REPORT_ONLY=1 print_results)
     if [[ -n "$OUTPUT_TEXT" ]]; then
         {
-            printf 'gh-dep-scanner, %s UTC: %s\n' "$(date -u '+%Y-%m-%d %H:%M')" "$SCAN_ARGUMENTS"
+            printf 'gh-dep-scanner, %s UTC\n' "$(date -u '+%Y-%m-%d %H:%M')"
             printf '%s\n' "$body" | strip_colors
+            command_section
         } >| "$OUTPUT_TEXT"
         print_info "Text report: $OUTPUT_TEXT"
     fi
@@ -69,6 +70,14 @@ output_path() {
     printf -v "$1" '%s' "$path"
 }
 
+# Print the command line of the scan below a divider, as the summary.
+command_section() {
+    echo ""
+    echo "================================================================================"
+    echo "${1:-}Command line:${2:-}"
+    printf '  %s %s\n' "$0" "$SCAN_ARGUMENTS"
+}
+
 strip_colors() {
     awk -v esc="$(printf '\033')" '{ gsub(esc "\\[[0-9;]*m", ""); print }'
 }
@@ -89,7 +98,7 @@ markdown_cell() {
 # text $1 (print_results). Uses the rows and columns of print_results.
 write_markdown() {
     printf '# gh-dep-scanner: %s\n\n' "$OWNER"
-    printf '%s UTC: `%s`\n' "$(date -u '+%Y-%m-%d %H:%M')" "${SCAN_ARGUMENTS//\`/\'}"
+    printf '%s UTC\n' "$(date -u '+%Y-%m-%d %H:%M')"
 
     local dep_file_name header="| Repository |" line="|---|" i group="" row_group
     dep_file_name=$(dep_file_names)
@@ -165,13 +174,13 @@ write_markdown() {
         /^Summary:/ { summary = 1; next }
         summary && /^  - / { sub(/^  - /, "- "); print; next }
         summary && /[^ =]/ { print "\n**" $0 "**" }'
+
+    printf '\n## Command line\n\n```sh\n%s %s\n```\n' "$0" "$SCAN_ARGUMENTS"
 }
 
 # Print the results as HTML on a white page: the text $1 (print_results)
 # with its colors.
 write_html() {
-    local options
-    options=$(printf '%s\n' "$SCAN_ARGUMENTS" | ansi_to_html)
     cat << EOF
 <!doctype html>
 <html lang="en">
@@ -182,6 +191,8 @@ write_html() {
 body { background: #fff; color: #1a1a1a; margin: 24px; font-family: sans-serif; }
 p { font-size: 13px; color: #555; }
 pre { font: 12px/1.35 Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+/* A long command line must not run off the page. */
+pre.command { white-space: pre-wrap; overflow-wrap: anywhere; }
 a { color: inherit; }
 .red { color: #c00000; }
 .green { color: #0a7a0a; }
@@ -198,10 +209,12 @@ a { color: inherit; }
 </style>
 </head>
 <body>
-<p>gh-dep-scanner, $(date -u '+%Y-%m-%d %H:%M') UTC: $options</p>
+<p>gh-dep-scanner, $(date -u '+%Y-%m-%d %H:%M') UTC</p>
 <pre>
 EOF
     printf '%s\n' "$1" | ansi_to_html
+    printf '</pre>\n<pre class="command">'
+    command_section "$BOLD" "$NC" | ansi_to_html
     printf '</pre>\n</body>\n</html>\n'
 }
 
