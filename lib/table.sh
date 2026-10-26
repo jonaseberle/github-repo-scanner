@@ -513,9 +513,12 @@ ordered_rows() {
 
     # Group the rows: version found, package not found, no file, parse error.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
-    local wanted_status i first
+    local wanted_status i first found_statuses="found"
+    if [[ $GROUP_BY_AFFECTED -eq 1 ]]; then
+        found_statuses="affected unchecked not_affected"
+    fi
     ORDERED_ROWS=""
-    for wanted_status in found filename_match not_in_file no_file error; do
+    for wanted_status in $found_statuses filename_match not_in_file no_file error; do
         # See row_shown.
         if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
             continue
@@ -570,6 +573,13 @@ print_results() {
             no_file) row_group="$no_file_group" ;;
             *) row_group="PARSE ERROR" ;;
         esac
+        if [[ $GROUP_BY_AFFECTED -eq 1 ]]; then
+            case "$status" in
+                affected) row_group="AFFECTED" ;;
+                unchecked) row_group="NOT CHECKED (no version range)" ;;
+                not_affected) row_group="NOT AFFECTED" ;;
+            esac
+        fi
         if [[ "$row_group" != "$group" ]]; then
             group="$row_group"
             echo ""

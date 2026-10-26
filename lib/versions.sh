@@ -99,6 +99,10 @@ version_dialect() {
 parse_affected() {
     VERSION_DIALECT=$(version_dialect)
     if [[ -z "$AFFECTED" ]]; then
+        if [[ $GROUP_BY_AFFECTED -eq 1 ]]; then
+            print_error "--group-by-affected needs --affected."
+            exit 1
+        fi
         return 0
     fi
     if ! range_parse "$AFFECTED" composer; then

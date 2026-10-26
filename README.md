@@ -63,6 +63,8 @@ Options (values only in the form --option=value):
   --affected=<ranges> Optional: affected version ranges, as in security
                       advisories, e.g. '>=13.0.0,<13.3.5|<6.4.5' (default:
                       show all found packages)
+  --group-by-affected Optional, with --affected: split FOUND into the groups
+                      AFFECTED, NOT CHECKED ("?") and NOT AFFECTED
   --repo=<regex>      Optional: only repos whose name matches this extended
                       regular expression, e.g. --repo='^typo3-'
   --branch=<name>     Optional: specific branch to check (default: repo's default)
@@ -346,7 +348,7 @@ Summary:
 
 Rows are grouped: FOUND (the package is in the dependency file), FILENAME MATCH (no version in the repository, but a file matches `--filename-match`), PACKAGE NOT FOUND (the package is not in it), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
 
-In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green. A version that is no version range (e.g. `dev-main`) ends with a yellow `?`.
+In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green. A version that is no version range (e.g. `dev-main`) ends with a yellow `?`. With `--group-by-affected`, FOUND is split into AFFECTED, NOT CHECKED and NOT AFFECTED.
 
 With `--type=node`, the PATH column shows the lock file. A directory with both `package-lock.json` and `yarn.lock` gets a row for each file, a yellow `!` after the path, and a warning.
 

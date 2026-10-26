@@ -27,6 +27,8 @@ DELAY=0
 BRANCH=""
 BRANCHES=""
 HIDE_MERGED=0
+# --group-by-affected: AFFECTED, NOT CHECKED and NOT AFFECTED instead of FOUND.
+GROUP_BY_AFFECTED=0
 # --hide-unknown: no VERSION FILE NOT FOUND rows. --hide-absent: also no PACKAGE NOT FOUND rows.
 HIDE_UNKNOWN=0
 HIDE_ABSENT=0

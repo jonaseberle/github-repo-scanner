@@ -121,6 +121,13 @@ write_markdown() {
             no_file) row_group="Version file not found (${dep_file_name// /, })" ;;
             *) row_group="Parse error" ;;
         esac
+        if [[ $GROUP_BY_AFFECTED -eq 1 ]]; then
+            case "${RESULT_STATUS[$i]}" in
+                affected) row_group="Affected" ;;
+                unchecked) row_group="Not checked (no version range)" ;;
+                not_affected) row_group="Not affected" ;;
+            esac
+        fi
         if [[ "$row_group" != "$group" ]]; then
             group="$row_group"
             printf '\n## %s\n\n%s\n%s\n' "$group" "$header" "$line"

@@ -45,6 +45,9 @@ ${BOLD}OPTIONS:${NC}
                         Example: --affected='>=13.0.0,<13.3.5|<6.4.5'
                         Default: show all found packages
 
+    --group-by-affected Optional, with --affected: split FOUND into the groups
+                        AFFECTED, NOT CHECKED ("?") and NOT AFFECTED
+
     --repo=<regex>      Optional: check only the repositories whose name (without
                         the owner) matches this extended regular expression
                         Examples: --repo='^typo3-', --repo='\.de$'
@@ -311,6 +314,9 @@ parse_args() {
                 ;;
             --hide-merged)
                 HIDE_MERGED=1
+                ;;
+            --group-by-affected)
+                GROUP_BY_AFFECTED=1
                 ;;
             --hide-unknown)
                 HIDE_UNKNOWN=1
