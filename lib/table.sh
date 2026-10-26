@@ -541,9 +541,10 @@ print_divider() {
 }
 
 print_results() {
-    # The terminal can change its size during a long scan.
+    # The terminal can change its size during a long scan. After Ctrl-C, stdin
+    # can be a pipe of the scan loop: tput then finds no terminal.
     if [[ $REPORT_ONLY -eq 0 ]]; then
-        TERM_COLUMNS=$(tput cols 2>/dev/null || echo "$TERM_COLUMNS")
+        TERM_COLUMNS=$(tput cols 2>/dev/null </dev/tty || echo "$TERM_COLUMNS")
     fi
     local dep_file_name no_file_group
     dep_file_name=$(dep_file_names)
