@@ -204,7 +204,9 @@ write_html() {
 <style>
 body { background: #fff; color: #1a1a1a; margin: 24px; font-family: sans-serif; }
 p { font-size: 13px; color: #555; }
-pre { font: 12px/1.35 Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+/* Hack first: the font of the Konsole profile of the author. The others
+   have the same width per character, or are the defaults of the systems. */
+pre { font: 12px/1.35 Hack, Menlo, Consolas, "DejaVu Sans Mono", monospace; }
 /* A long command line must not run off the page. */
 pre.command { white-space: pre-wrap; overflow-wrap: anywhere; }
 a { color: inherit; }
@@ -215,11 +217,22 @@ a { color: inherit; }
 .magenta { color: #8e2a8e; }
 .cyan { color: #00707a; }
 .bold { font-weight: bold; }
-.dim { color: #777; }
+.dim { color: #666; }
 .underline { text-decoration: underline; }
 /* 160 columns fit on a landscape A4 page. */
 @page { size: A4 landscape; margin: 12mm; }
-@media print { body { margin: 0; } pre { font-size: 9.5px; } }
+/* A PDF viewer rounds an underline to whole pixels: a thin one is 1 or 2
+   pixels thick, so the links look uneven. A line height of whole pixels
+   puts each underline at the same place in the pixel grid at 100, 150 and
+   200 %. At other zoom levels, a thicker underline varies less; lighter,
+   it does not look heavy. Other underlines are left out. */
+@media print {
+    body { margin: 0; }
+    pre { font-size: 10.5px; line-height: 14px; }
+    a { text-decoration-thickness: 2px; text-underline-offset: 2px;
+        text-decoration-color: color-mix(in srgb, currentColor 60%, transparent); }
+    .underline { text-decoration: none; }
+}
 </style>
 </head>
 <body>
