@@ -536,8 +536,9 @@ print_row() {
     local i row
     for ((i = 0; i < count; i++)); do
         printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
-        # Only the first line has the URL, and so the note.
-        if [[ $i -eq 0 ]]; then
+        # Only the first line has the URL, and so the note and the topics. Not
+        # if the URL got a line of its own.
+        if [[ $i -eq 0 && -n "${url_lines[0]}" ]]; then
             color_url_cell "$row_color" "$cell" "${#note}" "$url_length" "$topics"
         else
             color_url_cell "$row_color" "$cell" 0
