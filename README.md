@@ -357,7 +357,7 @@ Summary:
 
 ### Output Legend
 
-Rows are grouped: FOUND (the package is in the dependency file), FILENAME MATCH (no version in the repository, but a file matches `--filename-match`), PACKAGE NOT FOUND (the package is not in it), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL.
+Rows are grouped: FOUND (the package is in the dependency file), FILENAME MATCH (no version in the repository, but a file matches `--filename-match`), PACKAGE NOT FOUND (the package is not in it), VERSION FILE NOT FOUND (no dependency file) and PARSE ERROR (invalid dependency file). Inside each group, rows are sorted by URL. A row without a version whose branch has a version in another path starts with `(found in diff.path)`.
 
 In FOUND, a version in an `--affected` range is red, and the row ends with `*`. A version outside the ranges is green. A version that is no version range (e.g. `dev-main`) ends with a yellow `?`. With `--group-by-affected`, FOUND is split into AFFECTED, NOT CHECKED and NOT AFFECTED.
 

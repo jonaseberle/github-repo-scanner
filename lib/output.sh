@@ -122,6 +122,7 @@ write_markdown() {
     fi
 
     ordered_rows
+    set_found_branches
     for i in $ORDERED_ROWS; do
         case "${RESULT_STATUS[$i]}" in
             affected | not_affected | unchecked | found) row_group="Found" ;;
@@ -142,7 +143,8 @@ write_markdown() {
             printf '\n## %s\n\n%s\n%s\n' "$group" "$header" "$line"
         fi
         local url="${RESULT_URLS[$i]}" row path="${RESULT_PATHS[$i]}"
-        row="| [$(markdown_cell "${url##*/}")]($url) |"
+        row_note "$i"
+        row="| ${ROW_NOTE}[$(markdown_cell "${url##*/}")]($url) |"
         if show_branch_column; then
             branch_label "${RESULT_BRANCHES[$i]}" "${RESULT_BRANCH_STATUS[$i]}"
             row+=" $(markdown_cell "$BRANCH_LABEL") |"

@@ -67,6 +67,39 @@ wrap_path() {
     echo "$line"
 }
 
+# The branches with a version, one "<url> <branch>" per line, for row_note.
+FOUND_BRANCHES=""
+
+set_found_branches() {
+    local i
+    FOUND_BRANCHES=$'\n'
+    for i in "${!RESULT_STATUS[@]}"; do
+        case "${RESULT_STATUS[$i]}" in
+            affected | not_affected | unchecked | found) FOUND_BRANCHES+="${RESULT_URLS[$i]} ${RESULT_BRANCHES[$i]}"$'\n' ;;
+        esac
+    done
+}
+
+# Set ROW_NOTE to the note before the URL of row $1: a row without a version
+# whose branch has a version in another path. Needs set_found_branches.
+# A variable, not output: no subshell for each row.
+row_note() {
+    ROW_NOTE=""
+    case "${RESULT_STATUS[$1]}" in
+        no_file | not_in_file)
+            if [[ "$FOUND_BRANCHES" == *$'\n'"${RESULT_URLS[$1]} ${RESULT_BRANCHES[$1]}"$'\n'* ]]; then
+                ROW_NOTE="(found in diff.path) "
+            fi
+            ;;
+    esac
+}
+
+# Set URL_CELL to the URL cell $2 in the color $1. Its first $3 characters
+# are the note of row_note, in the default style.
+color_url_cell() {
+    URL_CELL="${2:0:$3}$1${2:$3}$NC"
+}
+
 # Column widths, set by set_column_widths.
 URL_COLUMN_WIDTH=55
 VERSION_COLUMN_WIDTH=15
@@ -78,13 +111,16 @@ PACKAGE_COLUMN_WIDTH=7
 # If the row is too wide, fit_columns chooses the widths.
 set_column_widths() {
     local i width url_width=8 version_width=7 path_width=0 branch_width=0 package_width=7
+    set_found_branches
     for i in "${!RESULT_STATUS[@]}"; do
         # A hidden row must not widen a column.
         if ! row_shown "$i"; then
             continue
         fi
-        if [[ ${#RESULT_URLS[$i]} -gt $url_width ]]; then
-            url_width=${#RESULT_URLS[$i]}
+        row_note "$i"
+        width=$((${#ROW_NOTE} + ${#RESULT_URLS[$i]}))
+        if [[ $width -gt $url_width ]]; then
+            url_width=$width
         fi
         if [[ ${#RESULT_VERSIONS[$i]} -gt $version_width ]]; then
             version_width=${#RESULT_VERSIONS[$i]}
@@ -159,6 +195,7 @@ fit_columns() {
             continue
         fi
         local path="" label=""
+        row_note "$i"
         if show_path_column; then
             path="${RESULT_PATHS[$i]}"
             if [[ ${RESULT_CONFLICT[$i]} -eq 1 ]]; then
@@ -169,7 +206,7 @@ fit_columns() {
             branch_label "${RESULT_BRANCHES[$i]}" "${RESULT_BRANCH_STATUS[$i]}"
             label="$BRANCH_LABEL"
         fi
-        printf '%s\t%s\t%s\t%s\t%s\n' "${#RESULT_URLS[$i]}" "${#label}" "$path" "${RESULT_PACKAGES[$i]}" "${RESULT_VERSIONS[$i]}"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$((${#ROW_NOTE} + ${#RESULT_URLS[$i]}))" "${#label}" "$path" "${RESULT_PACKAGES[$i]}" "${RESULT_VERSIONS[$i]}"
     done | sort | uniq -c | awk -v available="$1" -v columns="$TERM_COLUMNS" \
         -v max_url="$2" -v max_branch="$3" -v max_path="$4" -v max_package="$5" -v max_version="$6" \
         -v show_branch="$(show_branch_column && echo 1 || echo 0)" -v show_path="$(show_path_column && echo 1 || echo 0)" '
@@ -344,7 +381,8 @@ branch_label() {
 
 # Arguments: color, URL, branch, branch status (see branch_label), path, package, version,
 # visibility, and optionally the color of the version, a mark for the end
-# of the row and 1 for a conflict (a yellow "!" after the path).
+# of the row, 1 for a conflict (a yellow "!" after the path) and the note
+# of row_note before the URL.
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
@@ -353,7 +391,7 @@ branch_label() {
 # or further left if the line is too short.
 print_row() {
     local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
-    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}"
+    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}" note="${12:-}"
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
@@ -370,10 +408,13 @@ print_row() {
         fi
     fi
 
+    # The note is part of the URL cell.
+    url="$note$url"
     local -a url_lines=("$url") branch_lines=() path_lines=() package_lines=() version_lines=()
     local line cell
     if [[ ${#url} -gt $URL_COLUMN_WIDTH ]]; then
-        printf "%s%s%s\n" "$row_color" "$url" "$NC"
+        color_url_cell "$row_color" "$url" "${#note}"
+        printf "%s\n" "$URL_CELL"
         url_lines=("")
     fi
     # A branch that is too wide can use the PATH column of a row without a path.
@@ -389,10 +430,12 @@ print_row() {
         local start=$((URL_COLUMN_WIDTH + 1)) latest=$((TERM_COLUMNS - 1 - ${#branch}))
         if [[ -n "${url_lines[0]}" && $start -le $latest ]]; then
             printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "$url"
-            printf "%s%s%s %s%s%s\n" "$row_color" "$cell" "$NC" "$branch_color" "$branch" "$NC"
+            color_url_cell "$row_color" "$cell" "${#note}"
+            printf "%s %s%s%s\n" "$URL_CELL" "$branch_color" "$branch" "$NC"
         else
             if [[ -n "${url_lines[0]}" ]]; then
-                printf "%s%s%s\n" "$row_color" "$url" "$NC"
+                color_url_cell "$row_color" "$url" "${#note}"
+                printf "%s\n" "$URL_CELL"
             fi
             if [[ $start -gt $latest ]]; then
                 start=$latest
@@ -454,7 +497,13 @@ print_row() {
     local i row
     for ((i = 0; i < count; i++)); do
         printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
-        row="$row_color$cell$NC"
+        # Only the first line has the URL, and so the note.
+        if [[ $i -eq 0 ]]; then
+            color_url_cell "$row_color" "$cell" "${#note}"
+        else
+            color_url_cell "$row_color" "$cell" 0
+        fi
+        row="$URL_CELL"
         if [[ $spill -eq 1 && $i -eq 0 ]]; then
             printf -v cell "%-*s" "$((BRANCH_COLUMN_WIDTH + 1 + PATH_COLUMN_WIDTH))" "${branch_lines[$i]:-}"
             row+=" $branch_color$cell$NC"
@@ -612,13 +661,15 @@ print_results() {
             print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
-            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
+            row_note "$i"
+            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE"
             has_results=1
         elif [[ "$status" == "filename_match" ]]; then
             print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
-            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict"
+            row_note "$i"
+            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE"
             has_results=1
         fi
     done
