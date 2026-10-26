@@ -67,9 +67,9 @@ Options (values only in the form --option=value):
                       AFFECTED, NOT CHECKED ("?") and NOT AFFECTED
   --repo=<regex>      Optional: only repos whose name matches this extended
                       regular expression, e.g. --repo='^typo3-'
-  --topics=<regex>    Optional: only repos with a topic that matches this
-                      extended regular expression; the rows show all topics
-                      after the URL, the matching ones in bold
+  --topics[=regex]    Optional: show all topics of a repo after its URL; with
+                      a regex, only repos with a topic that matches this
+                      extended regular expression (matching topics in bold)
   --branch=<name>     Optional: specific branch to check (default: repo's default)
   --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a
@@ -322,7 +322,8 @@ Each run logs its GitHub requests and its steps to `./var/log/gh-dep-scanner.log
   --type=composer \
   --packages='^typo3/cms-core$' \
   --affected='<13' \
-  --group-by-affected
+  --group-by-affected \
+  --topics
 ```
 
 ```
@@ -330,25 +331,25 @@ Scanning YOUR_ORG repositories for packages matching ^typo3/cms-core$, affected:
 Branch: default
 
 Results: packages matching ^typo3/cms-core$ in repositories (affected: <13)
-================================================================================
+==========================================================================================
 
-REPO URL                                   PACKAGE        VERSION
---------                                   -------        -------
+REPO URL                                                    PACKAGE        VERSION
+--------                                                    -------        -------
 
 AFFECTED
-https://github.com/YOUR_ORG/client-portal  typo3/cms-core v12.4.45 *
-https://github.com/YOUR_ORG/shop-backend   typo3/cms-core v11.5.41 *
+https://github.com/YOUR_ORG/client-portal [typo3, intranet] typo3/cms-core v12.4.45 *
+https://github.com/YOUR_ORG/shop-backend [typo3, shop]      typo3/cms-core v11.5.41 *
 
 NOT AFFECTED
-https://github.com/YOUR_ORG/project-alpha  typo3/cms-core v13.4.36
+https://github.com/YOUR_ORG/project-alpha [typo3]           typo3/cms-core v13.4.36
 
 PACKAGE NOT FOUND
-https://github.com/YOUR_ORG/time-tracker                  Not found
+https://github.com/YOUR_ORG/time-tracker                                   Not found
 
 VERSION FILE NOT FOUND (composer.lock)
-https://github.com/YOUR_ORG/marketing-site                N/A
+https://github.com/YOUR_ORG/marketing-site                                 N/A
 
-================================================================================
+==========================================================================================
 Summary:
   - Total repos scanned: 5
   - Archived repos: 1

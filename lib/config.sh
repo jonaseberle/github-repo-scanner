@@ -48,6 +48,8 @@ NODE_ENGINES_EXCLUDE_PATHS='(^|/)(node_modules|bower_components|jspm_packages|we
 REPO_FILTER=""
 # --topics: only the repositories with a topic that matches this regex.
 TOPICS_FILTER=""
+# 1 with --topics, with or without a regex: the rows show the topics.
+TOPICS_SHOW=0
 SHOW_VISIBILITY=0
 # --output-text, --output-md, --output-html, --output-pdf: the files for the
 # results, and their width in columns.

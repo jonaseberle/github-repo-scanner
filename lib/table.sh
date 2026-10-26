@@ -96,12 +96,13 @@ row_note() {
 
 # Set TOPICS_LABEL to " [a, b]" for the topics $1 (separated by spaces), and
 # TOPICS_STYLED to it with colors: light, a topic that matches --topics bold.
+# An empty regex matches every topic: then none is bold.
 topics_label() {
     local topic
     TOPICS_LABEL="" TOPICS_STYLED=""
     for topic in $1; do
         TOPICS_LABEL+=", $topic"
-        if [[ "$topic" =~ $TOPICS_FILTER ]]; then
+        if [[ -n "$TOPICS_FILTER" && "$topic" =~ $TOPICS_FILTER ]]; then
             TOPICS_STYLED+=", $NC$COLOR_TOPIC_MATCH$topic$NC$COLOR_TOPICS"
         else
             TOPICS_STYLED+=", $topic"

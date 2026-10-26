@@ -161,7 +161,7 @@ fetch_repo_list() {
         has_topics=0
     fi
     if [[ $OFFLINE -eq 1 ]]; then
-        if [[ -n "$TOPICS_FILTER" && $has_topics -eq 0 ]]; then
+        if [[ $TOPICS_SHOW -eq 1 && $has_topics -eq 0 ]]; then
             print_error "The cached repository list has no topics. Run once without --offline." >&2
             return 1
         fi

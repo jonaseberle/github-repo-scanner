@@ -149,7 +149,7 @@ write_markdown() {
         if [[ -n "${RESULT_TOPICS[$i]}" ]]; then
             local topic topics=""
             for topic in ${RESULT_TOPICS[$i]}; do
-                if [[ "$topic" =~ $TOPICS_FILTER ]]; then
+                if [[ -n "$TOPICS_FILTER" && "$topic" =~ $TOPICS_FILTER ]]; then
                     topic="**$topic**"
                 fi
                 topics+=", $topic"

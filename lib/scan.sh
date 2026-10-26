@@ -224,7 +224,7 @@ scan_repos() {
         SCAN_POSITION=$i
         # Only --topics shows the topics.
         CURRENT_TOPICS=""
-        if [[ -n "$TOPICS_FILTER" && "$topics" != "-" ]]; then
+        if [[ $TOPICS_SHOW -eq 1 && "$topics" != "-" ]]; then
             CURRENT_TOPICS="$topics"
         fi
         log INFO "Scanning repo $i/$TOTAL_REPOS: $repo_name"
