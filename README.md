@@ -67,6 +67,9 @@ Options (values only in the form --option=value):
                       AFFECTED, NOT CHECKED ("?") and NOT AFFECTED
   --repo=<regex>      Optional: only repos whose name matches this extended
                       regular expression, e.g. --repo='^typo3-'
+  --topics=<regex>    Optional: only repos with a topic that matches this
+                      extended regular expression; the rows show all topics
+                      after the URL, the matching ones in bold
   --branch=<name>     Optional: specific branch to check (default: repo's default)
   --branches[=regex]  Optional: check all branches that match this extended
                       regular expression (instead of one branch); without a

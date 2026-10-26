@@ -144,7 +144,19 @@ write_markdown() {
         fi
         local url="${RESULT_URLS[$i]}" row path="${RESULT_PATHS[$i]}"
         row_note "$i"
-        row="| ${ROW_NOTE}[$(markdown_cell "${url##*/}")]($url) |"
+        row="| ${ROW_NOTE}[$(markdown_cell "${url##*/}")]($url)"
+        # The topics, a matching one bold (see topics_label).
+        if [[ -n "${RESULT_TOPICS[$i]}" ]]; then
+            local topic topics=""
+            for topic in ${RESULT_TOPICS[$i]}; do
+                if [[ "$topic" =~ $TOPICS_FILTER ]]; then
+                    topic="**$topic**"
+                fi
+                topics+=", $topic"
+            done
+            row+=" \\[${topics#, }\\]"
+        fi
+        row+=" |"
         if show_branch_column; then
             branch_label "${RESULT_BRANCHES[$i]}" "${RESULT_BRANCH_STATUS[$i]}"
             row+=" $(markdown_cell "$BRANCH_LABEL") |"

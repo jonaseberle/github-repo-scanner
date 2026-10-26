@@ -70,6 +70,7 @@ record_result() {
     RESULT_CONFLICT+=(0)
     RESULT_VISIBILITY+=("$4")
     RESULT_PACKAGES+=("$5")
+    RESULT_TOPICS+=("$CURRENT_TOPICS")
     RESULT_VERSIONS+=("$version_str")
     RESULT_STATUS+=("$status")
 }
@@ -217,10 +218,15 @@ scan_repos() {
 
     trap on_scan_interrupt INT
 
-    local i=0 repo_name repo_url is_private default_branch
-    while IFS=$'\t' read -r repo_name repo_url is_private default_branch; do
+    local i=0 repo_name repo_url is_private topics default_branch
+    while IFS=$'\t' read -r repo_name repo_url is_private topics default_branch; do
         i=$((i + 1))
         SCAN_POSITION=$i
+        # Only --topics shows the topics.
+        CURRENT_TOPICS=""
+        if [[ -n "$TOPICS_FILTER" && "$topics" != "-" ]]; then
+            CURRENT_TOPICS="$topics"
+        fi
         log INFO "Scanning repo $i/$TOTAL_REPOS: $repo_name"
 
         # Visibility
@@ -350,8 +356,9 @@ scan_repos() {
         fi
 
     # The default branch last: it can be empty ("gh repo view" of an empty
-    # repository), and read joins adjacent tabs.
-    done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, (.defaultBranchRef.name // "main")] | @tsv')
+    # repository), and read joins adjacent tabs. No topics: "-", which no
+    # topic can be.
+    done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, ((.topics // []) | join(" ") | if . == "" then "-" else . end), (.defaultBranchRef.name // "main")] | @tsv')
     trap - INT
 
     clear_progress

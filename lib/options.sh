@@ -52,6 +52,12 @@ ${BOLD}OPTIONS:${NC}
                         the owner) matches this extended regular expression
                         Examples: --repo='^typo3-', --repo='\.de$'
 
+    --topics=<regex>    Optional: check only the repositories with a topic
+                        that matches this extended regular expression. The
+                        rows show all topics of a repository after its URL,
+                        the matching ones in bold.
+                        Example: --topics='^typo3'
+
     --branch=<name>     Optional: specific branch to check
                         Default: repository's default branch
 
@@ -264,6 +270,9 @@ parse_args() {
             --repo=*)
                 REPO_FILTER="${1#*=}"
                 ;;
+            --topics=*)
+                TOPICS_FILTER="${1#*=}"
+                ;;
             --branch=*)
                 BRANCH="${1#*=}"
                 ;;
@@ -338,7 +347,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths|--filename-match)
+            --url|--type|--affected|--repo|--topics|--branch|--delay|--cache-repo-list-max-age|--excludePaths|--filename-match)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;

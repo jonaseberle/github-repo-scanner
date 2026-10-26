@@ -17,6 +17,9 @@ COLOR_PATH=$'\033[0;34m'
 COLOR_VERSION=$'\033[1m'
 COLOR_VISIBILITY=$'\033[2m'
 COLOR_PACKAGE=$'\033[4m'
+# The topics after the URL with --topics: light, a matching topic bold.
+COLOR_TOPICS=$'\033[2m'
+COLOR_TOPIC_MATCH=$'\033[1m'
 # The version with --affected: bold like COLOR_VERSION, red or green. One code
 # each: "$BOLD$RED" would end the bold, the "0;" of RED resets it.
 COLOR_AFFECTED=$'\033[1;31m'
@@ -43,6 +46,8 @@ EXCLUDE_PATHS_GIVEN=0
 # package managers. Each dependency there has a package.json with "engines".
 NODE_ENGINES_EXCLUDE_PATHS='(^|/)(node_modules|bower_components|jspm_packages|web_modules|vendor|\.yarn|\.pnpm-store)/'
 REPO_FILTER=""
+# --topics: only the repositories with a topic that matches this regex.
+TOPICS_FILTER=""
 SHOW_VISIBILITY=0
 # --output-text, --output-md, --output-html, --output-pdf: the files for the
 # results, and their width in columns.
@@ -120,6 +125,10 @@ declare -a RESULT_BRANCH_STATUS=()
 # The branch status of the branch that is scanned now, for record_result.
 CURRENT_BRANCH_STATUS=""
 declare -a RESULT_PACKAGES=()
+# With --topics: the topics of the repository, separated by spaces.
+declare -a RESULT_TOPICS=()
+# The topics of the repository that is scanned now, for record_result.
+CURRENT_TOPICS=""
 declare -a RESULT_STATUS=()
 
 # Counters
@@ -141,6 +150,7 @@ LOCK_CONFLICT_COUNT=0
 # package.json files whose .nvmrc or .node-version is outside their "engines.node".
 NODE_VERSION_CONFLICT_COUNT=0
 FILTERED_OUT_COUNT=0
+TOPICS_FILTERED_OUT_COUNT=0
 REFRESHED_COUNT=0
 # Stays empty for a single repository.
 ARCHIVED_COUNT=""

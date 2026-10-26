@@ -12,7 +12,8 @@ fetch_repos() {
         if [[ $OFFLINE -eq 1 ]]; then
             view=gh_cached
         fi
-        repos_json=$("$view" "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef,pushedAt --jq '[.]') || {
+        repos_json=$("$view" "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef,pushedAt,repositoryTopics \
+            --jq '[. + {topics: [.repositoryTopics[]?.name]} | del(.repositoryTopics)]') || {
             print_error "Failed to fetch repository: $OWNER/$REPO"
             exit 1
         }
@@ -30,15 +31,27 @@ fetch_repos() {
     fi
 
     # Filter with bash, not jq: jq regular expressions are not POSIX extended ones.
-    if [[ -n "$REPO_FILTER" ]]; then
-        local name matching=""
-        while IFS= read -r name; do
-            if [[ "$name" =~ $REPO_FILTER ]]; then
-                matching+="$name"$'\n'
-            else
+    if [[ -n "$REPO_FILTER$TOPICS_FILTER" ]]; then
+        local name topics topic matching="" match
+        while IFS=$'\t' read -r name topics; do
+            if [[ -n "$REPO_FILTER" && ! "$name" =~ $REPO_FILTER ]]; then
                 FILTERED_OUT_COUNT=$((FILTERED_OUT_COUNT + 1))
+                continue
             fi
-        done < <(echo "$repos_json" | jq -r '.[].name')
+            if [[ -n "$TOPICS_FILTER" ]]; then
+                match=0
+                for topic in $topics; do
+                    if [[ "$topic" =~ $TOPICS_FILTER ]]; then
+                        match=1
+                    fi
+                done
+                if [[ $match -eq 0 ]]; then
+                    TOPICS_FILTERED_OUT_COUNT=$((TOPICS_FILTERED_OUT_COUNT + 1))
+                    continue
+                fi
+            fi
+            matching+="$name"$'\n'
+        done < <(echo "$repos_json" | jq -r '.[] | [.name, (.topics // [] | join(" "))] | @tsv')
         repos_json=$(echo "$repos_json" | jq --arg names "$matching" '($names | split("\n")) as $names | [.[] | select(.name as $name | any($names[]; . == $name))]')
     fi
 
@@ -50,20 +63,20 @@ fetch_repos() {
     fi
 
     if [[ "$TOTAL_REPOS" -eq 0 ]]; then
-        if [[ -n "$REPO_FILTER" ]]; then
-            print_warning "No repository of $OWNER matches --repo='$REPO_FILTER'"
+        if [[ -n "$REPO_FILTER$TOPICS_FILTER" ]]; then
+            print_warning "No repository of $OWNER matches${REPO_FILTER:+ --repo='$REPO_FILTER'}${TOPICS_FILTER:+ --topics='$TOPICS_FILTER'}"
         else
             print_warning "No repositories found for $OWNER"
         fi
         exit 0
     fi
 
-    log INFO "Repositories of $OWNER_TYPE $OWNER: $TOTAL_REPOS to scan, ${ARCHIVED_COUNT:-0} archived, $FILTERED_OUT_COUNT not matching --repo"
+    log INFO "Repositories of $OWNER_TYPE $OWNER: $TOTAL_REPOS to scan, ${ARCHIVED_COUNT:-0} archived, $FILTERED_OUT_COUNT not matching --repo, $TOPICS_FILTERED_OUT_COUNT not matching --topics"
     print_success "Found $TOTAL_REPOS repositories."
 }
 
 # The REST fields of a repository, with the names of "gh repo view --json".
-REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at, updatedAt: .updated_at}'
+REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at, updatedAt: .updated_at, topics}'
 # The number of repositories of an org or user (jq, on "gh api orgs/NAME").
 # Nothing if GitHub does not give the private ones: this needs a token scope
 # (e.g. "user" for the own account, which a "gh auth login" does not ask for).
@@ -142,9 +155,18 @@ fetch_repo_list() {
     file="$CACHE_DIR/$key"
     local full_request="$endpoint&per_page=100&sort=pushed&direction=desc" full="$CACHE_DIR/$key.full"
 
+    # A list cached before the topics were added has no "topics".
+    local has_topics=1
+    if [[ -f "$file" ]] && ! jq --slurp --exit-status 'all(.[]; has("topics"))' "$file" > /dev/null; then
+        has_topics=0
+    fi
     if [[ $OFFLINE -eq 1 ]]; then
+        if [[ -n "$TOPICS_FILTER" && $has_topics -eq 0 ]]; then
+            print_error "The cached repository list has no topics. Run once without --offline." >&2
+            return 1
+        fi
         listing=$(gh_cached "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
-    elif [[ $USE_CACHE -eq 0 || ! -f "$file" ]]; then
+    elif [[ $USE_CACHE -eq 0 || ! -f "$file" || $has_topics -eq 0 ]]; then
         log INFO "Fetching the full repository list: $endpoint"
         listing=$(gh_fresh "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
         write_cache_entry "$full" ""
