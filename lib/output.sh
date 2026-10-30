@@ -120,6 +120,10 @@ write_markdown() {
         header+=" Pushed (UTC) |"
         line+="---|"
     fi
+    if show_created_column; then
+        header+=" Created (UTC) |"
+        line+="---|"
+    fi
     if show_first_author_column; then
         header+=" First commit by |"
         line+="---|"
@@ -189,8 +193,12 @@ write_markdown() {
             row+=" $(markdown_cell "${RESULT_PACKAGES[$i]}") | $(markdown_cell "${RESULT_VERSIONS[$i]}") |"
         fi
         if show_pushed_column; then
-            pushed_label "${RESULT_PUSHED[$i]}"
-            row+=" $PUSHED_LABEL |"
+            time_label "${RESULT_PUSHED[$i]}"
+            row+=" $TIME_LABEL |"
+        fi
+        if show_created_column; then
+            time_label "${RESULT_CREATED[$i]}"
+            row+=" $TIME_LABEL |"
         fi
         if show_first_author_column; then
             row+=" $(markdown_cell "${RESULT_FIRST_AUTHOR[$i]}") |"

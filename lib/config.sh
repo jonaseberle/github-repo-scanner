@@ -55,6 +55,8 @@ SHOW_VISIBILITY=0
 SHOW_FIRST_AUTHOR=0
 # --show-pushed: the PUSHED column without --sort=pushed.
 SHOW_PUSHED=0
+# --show-created: a column with the creation time of the repository.
+SHOW_CREATED=0
 # --sort: "name", or "pushed" (newest push first, with a PUSHED column).
 SORT="name"
 # 1 without --packages and --filename-match: list the repositories only.
@@ -145,6 +147,11 @@ CURRENT_TOPICS=""
 declare -a RESULT_PUSHED=()
 # The last push of the repository that is scanned now, for record_result.
 CURRENT_PUSHED=""
+# The creation of the repository on GitHub ("2026-10-22T18:53:33Z"), "?" if
+# unknown, or empty.
+declare -a RESULT_CREATED=()
+# The creation of the repository that is scanned now, for record_result.
+CURRENT_CREATED=""
 # The author of the first commit (see first_author_label), or empty.
 declare -a RESULT_FIRST_AUTHOR=()
 # The author of the first commit of the repository that is scanned now, for record_result.

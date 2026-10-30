@@ -75,6 +75,7 @@ record_result() {
     RESULT_PACKAGES+=("$5")
     RESULT_TOPICS+=("$CURRENT_TOPICS")
     RESULT_PUSHED+=("$CURRENT_PUSHED")
+    RESULT_CREATED+=("$CURRENT_CREATED")
     RESULT_FIRST_AUTHOR+=("$CURRENT_FIRST_AUTHOR")
     RESULT_ARCHIVED+=("$CURRENT_ARCHIVED")
     RESULT_VERSIONS+=("$version_str")
@@ -230,8 +231,8 @@ scan_repos() {
 
     trap on_scan_interrupt INT
 
-    local i=0 repo_name repo_url is_private is_archived topics pushed default_branch
-    while IFS=$'\t' read -r repo_name repo_url is_private is_archived topics pushed default_branch; do
+    local i=0 repo_name repo_url is_private is_archived topics pushed created default_branch
+    while IFS=$'\t' read -r repo_name repo_url is_private is_archived topics pushed created default_branch; do
         i=$((i + 1))
         SCAN_POSITION=$i
         # Only --topics shows the topics.
@@ -240,6 +241,10 @@ scan_repos() {
             CURRENT_TOPICS="$topics"
         fi
         CURRENT_PUSHED="${pushed#-}"
+        CURRENT_CREATED=""
+        if [[ $SHOW_CREATED -eq 1 ]]; then
+            CURRENT_CREATED="${created/#-/?}"
+        fi
         CURRENT_FIRST_AUTHOR=""
         if [[ $SHOW_FIRST_AUTHOR -eq 1 ]]; then
             first_author_label "$repo_name"
@@ -385,9 +390,9 @@ scan_repos() {
         fi
 
     # The default branch last: it can be empty ("gh repo view" of an empty
-    # repository), and read joins adjacent tabs. No topics or no push: "-",
-    # which no topic or time can be.
-    done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, (.isArchived // false), ((.topics // []) | join(" ") | if . == "" then "-" else . end), (.pushedAt // "-"), (.defaultBranchRef.name // "main")] | @tsv')
+    # repository), and read joins adjacent tabs. No topics, no push or no
+    # creation time: "-", which no topic or time can be.
+    done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, (.isArchived // false), ((.topics // []) | join(" ") | if . == "" then "-" else . end), (.pushedAt // "-"), (.createdAt // "-"), (.defaultBranchRef.name // "main")] | @tsv')
     trap - INT
 
     clear_progress

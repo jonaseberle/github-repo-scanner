@@ -109,6 +109,9 @@ Options (values only in the form --option=value):
                       commit of the default branch (GitHub does not store who
                       created a repo). A fork shows "[fork]"
   --show-pushed       Optional: add a column with the last push to any branch
+  --show-created      Optional: add a column with the creation of the repo on
+                      GitHub (for an imported repo: the import, for a fork:
+                      the fork)
   --archived[=mode]   Optional: "hide" (default), "show" (in groups of their
                       own, e.g. "ARCHIVED: FOUND") or "only" the archived
                       repos; without a mode: show

@@ -12,7 +12,7 @@ fetch_repos() {
         if [[ $OFFLINE -eq 1 ]]; then
             view=gh_cached
         fi
-        repos_json=$("$view" "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,isArchived,defaultBranchRef,pushedAt,repositoryTopics \
+        repos_json=$("$view" "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,isArchived,defaultBranchRef,pushedAt,createdAt,repositoryTopics \
             --jq '[. + {topics: [.repositoryTopics[]?.name]} | del(.repositoryTopics)]') || {
             print_error "Failed to fetch repository: $OWNER/$REPO"
             exit 1
@@ -83,7 +83,7 @@ fetch_repos() {
 }
 
 # The REST fields of a repository, with the names of "gh repo view --json".
-REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at, updatedAt: .updated_at, topics}'
+REPO_FIELDS='{name, url: .html_url, isPrivate: .private, isArchived: .archived, defaultBranchRef: {name: .default_branch}, pushedAt: .pushed_at, updatedAt: .updated_at, createdAt: .created_at, topics}'
 # The number of repositories of an org or user (jq, on "gh api orgs/NAME").
 # Nothing if GitHub does not give the private ones: this needs a token scope
 # (e.g. "user" for the own account, which a "gh auth login" does not ask for).
@@ -162,18 +162,19 @@ fetch_repo_list() {
     file="$CACHE_DIR/$key"
     local full_request="$endpoint&per_page=100&sort=pushed&direction=desc" full="$CACHE_DIR/$key.full"
 
-    # A list cached before the topics were added has no "topics".
-    local has_topics=1
-    if [[ -f "$file" ]] && ! jq --slurp --exit-status 'all(.[]; has("topics"))' "$file" > /dev/null; then
-        has_topics=0
+    # A list cached before a field of REPO_FIELDS was added (e.g. "topics",
+    # "createdAt") lacks it.
+    local has_fields=1
+    if [[ -f "$file" ]] && ! jq --slurp --exit-status 'all(.[]; has("topics") and has("createdAt"))' "$file" > /dev/null; then
+        has_fields=0
     fi
     if [[ $OFFLINE -eq 1 ]]; then
-        if [[ $TOPICS_SHOW -eq 1 && $has_topics -eq 0 ]]; then
-            print_error "The cached repository list has no topics. Run once without --offline." >&2
+        if [[ ($TOPICS_SHOW -eq 1 || $SHOW_CREATED -eq 1) && $has_fields -eq 0 ]]; then
+            print_error "The cached repository list has no topics or creation times. Run once without --offline." >&2
             return 1
         fi
         listing=$(gh_cached "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
-    elif [[ $USE_CACHE -eq 0 || ! -f "$file" || $has_topics -eq 0 ]]; then
+    elif [[ $USE_CACHE -eq 0 || ! -f "$file" || $has_fields -eq 0 ]]; then
         log INFO "Fetching the full repository list: $endpoint"
         listing=$(gh_fresh "$key" api --paginate "$full_request" --jq ".[] | $REPO_FIELDS") || return 1
         write_cache_entry "$full" ""
@@ -365,7 +366,7 @@ first_commit_batch() {
 # Set FIRST_AUTHOR_LABEL to the author of the first commit of repository $1,
 # from the cache: "name (login)", or the one GitHub knows. A fork gets
 # "[fork]". "?" without a cache entry.
-# A variable, not output: like pushed_label.
+# A variable, not output: like time_label.
 first_author_label() {
     local file="$CACHE_DIR/api/repos/$OWNER/$1/first-commit"
     if [[ ! -f "$file" ]]; then

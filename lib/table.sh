@@ -202,7 +202,10 @@ set_column_widths() {
         available=$((available - 11))
     fi
     if show_pushed_column; then
-        available=$((available - 1 - PUSHED_WIDTH))
+        available=$((available - 1 - TIME_WIDTH))
+    fi
+    if show_created_column; then
+        available=$((available - 1 - TIME_WIDTH))
     fi
     if show_first_author_column; then
         first_author_width
@@ -372,6 +375,31 @@ show_pushed_column() {
     [[ "$SORT" == "pushed" || $SHOW_PUSHED -eq 1 ]]
 }
 
+# The CREATED column: with --show-created.
+show_created_column() {
+    [[ $SHOW_CREATED -eq 1 ]]
+}
+
+# True if a column right of column $1 is shown. Only then is a cell of
+# column $1 padded: the last cell of a row is not.
+# The columns from VERSION on, from left to right.
+column_after_shown() {
+    local column right=0
+    for column in version pushed created first_author visibility; do
+        if [[ $right -eq 1 ]]; then
+            case "$column" in
+                pushed) show_pushed_column && return 0 ;;
+                created) show_created_column && return 0 ;;
+                first_author) show_first_author_column && return 0 ;;
+                visibility) [[ $SHOW_VISIBILITY -eq 1 ]] && return 0 ;;
+            esac
+        elif [[ "$column" == "$1" ]]; then
+            right=1
+        fi
+    done
+    return 1
+}
+
 # The FIRST COMMIT BY column: with --show-first-author.
 show_first_author_column() {
     [[ $SHOW_FIRST_AUTHOR -eq 1 ]]
@@ -396,15 +424,15 @@ first_author_width() {
     FIRST_AUTHOR_COLUMN_WIDTH=$width
 }
 
-# The width of a time in the PUSHED column, see pushed_label.
-PUSHED_WIDTH=16
+# The width of a time in the PUSHED and CREATED columns, see time_label.
+TIME_WIDTH=16
 
-# Set PUSHED_LABEL to the time $1 ("2026-10-22T18:53:33Z") as "2026-10-22 18:53".
+# Set TIME_LABEL to the time $1 ("2026-10-22T18:53:33Z") as "2026-10-22 18:53".
 # A variable, not output: no subshell for each row.
-pushed_label() {
-    PUSHED_LABEL="${1:0:10}"
+time_label() {
+    TIME_LABEL="${1:0:10}"
     if [[ ${#1} -ge 16 ]]; then
-        PUSHED_LABEL+=" ${1:11:5}"
+        TIME_LABEL+=" ${1:11:5}"
     fi
 }
 
@@ -475,7 +503,8 @@ branch_label() {
 # visibility, and optionally the color of the version, a mark for the end
 # of the row, 1 for a conflict (a yellow "!" after the path), the note
 # of row_note before the URL, the topics after it, the time of the
-# PUSHED column (see pushed_label) and the author of the first commit.
+# PUSHED column (see time_label), the author of the first commit and the
+# time of the CREATED column.
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
@@ -484,17 +513,17 @@ branch_label() {
 # or further left if the line is too short.
 print_row() {
     local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
-    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}" note="${12:-}" topics="${13:-}" pushed="${14:-}" first_author="${15:-}"
+    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}" note="${12:-}" topics="${13:-}" pushed="${14:-}" first_author="${15:-}" created="${16:-}"
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
-    local version_color="${version_color_arg:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY" pushed_color="" first_author_color=""
+    local version_color="${version_color_arg:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY" time_color="" first_author_color=""
     if [[ -z "$row_color" || "$row_color" == "$BOLD" ]]; then
-        branch_color="$row_color" path_color="$row_color" package_color="$row_color" version_color="$row_color" visibility_color="$row_color" pushed_color="$row_color" first_author_color="$row_color"
+        branch_color="$row_color" path_color="$row_color" package_color="$row_color" version_color="$row_color" visibility_color="$row_color" time_color="$row_color" first_author_color="$row_color"
     fi
     # A cell after the URL: else the URL is not padded.
     local url_width=$URL_COLUMN_WIDTH
-    if ! show_package_columns && ! show_branch_column && ! show_path_column && ! show_pushed_column && ! show_first_author_column && [[ $SHOW_VISIBILITY -eq 0 ]]; then
+    if ! show_package_columns && ! show_branch_column && ! show_path_column && ! column_after_shown version; then
         url_width=0
     fi
     # Before the width checks: set_column_widths counts the label too.
@@ -638,7 +667,7 @@ print_row() {
             printf -v cell "%-*s" "$PACKAGE_COLUMN_WIDTH" ""
             row+=" $package_color$package_text$NC${cell:${#package_text}}"
             # The last cell is not padded.
-            if [[ $SHOW_VISIBILITY -eq 1 ]] || show_pushed_column || show_first_author_column; then
+            if column_after_shown version; then
                 printf -v cell "%-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
                 row+=" $version_color$cell$NC"
             else
@@ -647,10 +676,17 @@ print_row() {
         fi
         if [[ $i -eq 0 ]] && show_pushed_column; then
             cell="$pushed"
-            if [[ $SHOW_VISIBILITY -eq 1 ]] || show_first_author_column; then
-                printf -v cell "%-*s" "$PUSHED_WIDTH" "$pushed"
+            if column_after_shown pushed; then
+                printf -v cell "%-*s" "$TIME_WIDTH" "$pushed"
             fi
-            row+=" $pushed_color$cell$NC"
+            row+=" $time_color$cell$NC"
+        fi
+        if [[ $i -eq 0 ]] && show_created_column; then
+            cell="$created"
+            if column_after_shown created; then
+                printf -v cell "%-*s" "$TIME_WIDTH" "$created"
+            fi
+            row+=" $time_color$cell$NC"
         fi
         if [[ $i -eq 0 ]] && show_first_author_column; then
             cell="$first_author"
@@ -664,7 +700,7 @@ print_row() {
                 cell="${cell:0:$((FIRST_AUTHOR_COLUMN_WIDTH - ${#fork_mark} - 1))}…$fork_mark"
             fi
             # Pad by characters, not with printf: printf counts the bytes of "ü".
-            if [[ $SHOW_VISIBILITY -eq 1 ]]; then
+            if column_after_shown first_author; then
                 local first_author_text="$cell"
                 printf -v cell "%-*s" "$FIRST_AUTHOR_COLUMN_WIDTH" ""
                 cell="$first_author_text${cell:${#first_author_text}}"
@@ -768,8 +804,8 @@ print_results() {
     # Print header
     hide_single_paths
     set_column_widths
-    print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY" "" "" "" "" "" "PUSHED (UTC)" "FIRST COMMIT BY"
-    print_row "" "--------" "------" "" "----" "-------" "-------" "----------" "" "" "" "" "" "------------" "---------------"
+    print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY" "" "" "" "" "" "PUSHED (UTC)" "FIRST COMMIT BY" "CREATED (UTC)"
+    print_row "" "--------" "------" "" "----" "-------" "-------" "----------" "" "" "" "" "" "------------" "---------------" "-------------"
 
     local has_results=0
 
@@ -787,9 +823,11 @@ print_results() {
         local conflict="${RESULT_CONFLICT[$i]}"
         local package="${RESULT_PACKAGES[$i]}"
         local topics="${RESULT_TOPICS[$i]}"
-        pushed_label "${RESULT_PUSHED[$i]}"
-        local pushed="$PUSHED_LABEL"
+        time_label "${RESULT_PUSHED[$i]}"
+        local pushed="$TIME_LABEL"
         local first_author="${RESULT_FIRST_AUTHOR[$i]}"
+        time_label "${RESULT_CREATED[$i]}"
+        local created="$TIME_LABEL"
 
         case "$status" in
             affected | not_affected | unchecked | found) row_group="FOUND" ;;
@@ -820,29 +858,29 @@ print_results() {
         # With --affected, the color of the version and a "*" at the end show
         # whether it is affected. Not affected rows do not count as results.
         if [[ "$status" == "affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$conflict" "" "$topics" "$pushed" "$first_author"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$conflict" "" "$topics" "$pushed" "$first_author"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
         elif [[ "$status" == "unchecked" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$conflict" "" "$topics" "$pushed" "$first_author"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
             has_results=1
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
             row_note "$i"
-            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author"
+            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author" "$created"
             has_results=1
         elif [[ "$status" == "filename_match" ]]; then
-            print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author"
+            print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
             row_note "$i"
-            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author"
+            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author" "$created"
             has_results=1
         elif [[ "$status" == "listed" ]]; then
-            print_row "$NC" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author"
+            print_row "$NC" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
             has_results=1
         fi
     done

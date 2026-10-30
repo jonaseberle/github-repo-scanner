@@ -160,7 +160,7 @@ main() {
         print_info "$(rate_limit_summary)"
     fi
 
-    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER topics=$TOPICS_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS excludePaths=$EXCLUDE_PATHS filename-match=$FILENAME_MATCH sort=$SORT archived=$ARCHIVED show-first-author=$SHOW_FIRST_AUTHOR show-pushed=$SHOW_PUSHED cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER topics=$TOPICS_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS excludePaths=$EXCLUDE_PATHS filename-match=$FILENAME_MATCH sort=$SORT archived=$ARCHIVED show-first-author=$SHOW_FIRST_AUTHOR show-pushed=$SHOW_PUSHED show-created=$SHOW_CREATED cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"

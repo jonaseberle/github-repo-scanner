@@ -130,6 +130,10 @@ ${BOLD}OPTIONS:${NC}
                         to any branch, as with --sort=pushed, and keep the
                         order of --sort
 
+    --show-created      Optional: add a column CREATED (UTC) with the time
+                        GitHub created the repository. For an imported
+                        repository, this is the import, and for a fork, the fork
+
     --archived[=mode]   Optional: the archived repositories:
                           hide  skip them (default)
                           show  scan them too, in groups of their own
@@ -342,6 +346,9 @@ parse_args() {
                 ;;
             --show-pushed)
                 SHOW_PUSHED=1
+                ;;
+            --show-created)
+                SHOW_CREATED=1
                 ;;
             --sort=*)
                 SORT="${1#*=}"
