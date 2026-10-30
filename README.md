@@ -108,6 +108,7 @@ Options (values only in the form --option=value):
   --show-first-author Optional: add a column with the author of the first
                       commit of the default branch (GitHub does not store who
                       created a repo). A fork shows "[fork]"
+  --show-pushed       Optional: add a column with the last push to any branch
   --archived[=mode]   Optional: "hide" (default), "show" (in groups of their
                       own, e.g. "ARCHIVED: FOUND") or "only" the archived
                       repos; without a mode: show

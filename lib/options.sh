@@ -126,6 +126,10 @@ ${BOLD}OPTIONS:${NC}
                         "[fork]": its first commit is from the upstream.
                         Costs 2 GraphQL requests per 20 repositories once
 
+    --show-pushed       Optional: add a column PUSHED (UTC) with the last push
+                        to any branch, as with --sort=pushed, and keep the
+                        order of --sort
+
     --archived[=mode]   Optional: the archived repositories:
                           hide  skip them (default)
                           show  scan them too, in groups of their own
@@ -335,6 +339,9 @@ parse_args() {
                 ;;
             --show-first-author)
                 SHOW_FIRST_AUTHOR=1
+                ;;
+            --show-pushed)
+                SHOW_PUSHED=1
                 ;;
             --sort=*)
                 SORT="${1#*=}"

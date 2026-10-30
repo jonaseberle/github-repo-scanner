@@ -367,9 +367,9 @@ show_package_columns() {
     [[ $LIST_ONLY -eq 0 ]]
 }
 
-# The PUSHED column: with --sort=pushed.
+# The PUSHED column: with --sort=pushed or --show-pushed.
 show_pushed_column() {
-    [[ "$SORT" == "pushed" ]]
+    [[ "$SORT" == "pushed" || $SHOW_PUSHED -eq 1 ]]
 }
 
 # The FIRST COMMIT BY column: with --show-first-author.
@@ -700,11 +700,11 @@ ordered_rows() {
         if [[ "${RESULT_BRANCH_STATUS[$i]}" == "default" ]]; then
             first=0
         fi
-        if show_pushed_column; then
+        if [[ "$SORT" == "pushed" ]]; then
             printf '%s ' "${RESULT_PUSHED[$i]:-0}"
         fi
         echo "${RESULT_URLS[$i]} $first${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"
-    done | if show_pushed_column; then
+    done | if [[ "$SORT" == "pushed" ]]; then
         sort --key=1,1r --key=2f
     else
         sort --ignore-case

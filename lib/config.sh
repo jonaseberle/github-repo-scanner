@@ -53,6 +53,8 @@ TOPICS_SHOW=0
 SHOW_VISIBILITY=0
 # --show-first-author: a column with the author of the first commit.
 SHOW_FIRST_AUTHOR=0
+# --show-pushed: the PUSHED column without --sort=pushed.
+SHOW_PUSHED=0
 # --sort: "name", or "pushed" (newest push first, with a PUSHED column).
 SORT="name"
 # 1 without --packages and --filename-match: list the repositories only.
