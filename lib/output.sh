@@ -124,6 +124,10 @@ write_markdown() {
         header+=" Created (UTC) |"
         line+="---|"
     fi
+    if show_first_commit_column; then
+        header+=" First commit (UTC) |"
+        line+="---|"
+    fi
     if show_first_author_column; then
         header+=" First commit by |"
         line+="---|"
@@ -198,6 +202,10 @@ write_markdown() {
         fi
         if show_created_column; then
             time_label "${RESULT_CREATED[$i]}"
+            row+=" $TIME_LABEL |"
+        fi
+        if show_first_commit_column; then
+            time_label "${RESULT_FIRST_COMMIT_DATE[$i]}"
             row+=" $TIME_LABEL |"
         fi
         if show_first_author_column; then

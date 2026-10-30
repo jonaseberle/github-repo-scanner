@@ -207,6 +207,9 @@ set_column_widths() {
     if show_created_column; then
         available=$((available - 1 - TIME_WIDTH))
     fi
+    if show_first_commit_column; then
+        available=$((available - 1 - FIRST_COMMIT_WIDTH))
+    fi
     if show_first_author_column; then
         first_author_width
         available=$((available - 1 - FIRST_AUTHOR_COLUMN_WIDTH))
@@ -385,11 +388,12 @@ show_created_column() {
 # The columns from VERSION on, from left to right.
 column_after_shown() {
     local column right=0
-    for column in version pushed created first_author visibility; do
+    for column in version pushed created first_commit first_author visibility; do
         if [[ $right -eq 1 ]]; then
             case "$column" in
                 pushed) show_pushed_column && return 0 ;;
                 created) show_created_column && return 0 ;;
+                first_commit) show_first_commit_column && return 0 ;;
                 first_author) show_first_author_column && return 0 ;;
                 visibility) [[ $SHOW_VISIBILITY -eq 1 ]] && return 0 ;;
             esac
@@ -399,6 +403,14 @@ column_after_shown() {
     done
     return 1
 }
+
+# The FIRST COMMIT column: with --show-first-commit-date.
+show_first_commit_column() {
+    [[ $SHOW_FIRST_COMMIT_DATE -eq 1 ]]
+}
+
+# The FIRST COMMIT column: its header is wider than a time.
+FIRST_COMMIT_WIDTH=18
 
 # The FIRST COMMIT BY column: with --show-first-author.
 show_first_author_column() {
@@ -503,8 +515,8 @@ branch_label() {
 # visibility, and optionally the color of the version, a mark for the end
 # of the row, 1 for a conflict (a yellow "!" after the path), the note
 # of row_note before the URL, the topics after it, the time of the
-# PUSHED column (see time_label), the author of the first commit and the
-# time of the CREATED column.
+# PUSHED column (see time_label), the author of the first commit, and the
+# times of the CREATED and FIRST COMMIT columns.
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
@@ -513,7 +525,7 @@ branch_label() {
 # or further left if the line is too short.
 print_row() {
     local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
-    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}" note="${12:-}" topics="${13:-}" pushed="${14:-}" first_author="${15:-}" created="${16:-}"
+    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}" note="${12:-}" topics="${13:-}" pushed="${14:-}" first_author="${15:-}" created="${16:-}" first_commit="${17:-}"
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
@@ -688,6 +700,13 @@ print_row() {
             fi
             row+=" $time_color$cell$NC"
         fi
+        if [[ $i -eq 0 ]] && show_first_commit_column; then
+            cell="$first_commit"
+            if column_after_shown first_commit; then
+                printf -v cell "%-*s" "$FIRST_COMMIT_WIDTH" "$first_commit"
+            fi
+            row+=" $time_color$cell$NC"
+        fi
         if [[ $i -eq 0 ]] && show_first_author_column; then
             cell="$first_author"
             # Cut the name, not the " [fork]".
@@ -804,8 +823,8 @@ print_results() {
     # Print header
     hide_single_paths
     set_column_widths
-    print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY" "" "" "" "" "" "PUSHED (UTC)" "FIRST COMMIT BY" "CREATED (UTC)"
-    print_row "" "--------" "------" "" "----" "-------" "-------" "----------" "" "" "" "" "" "------------" "---------------" "-------------"
+    print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY" "" "" "" "" "" "PUSHED (UTC)" "FIRST COMMIT BY" "CREATED (UTC)" "FIRST COMMIT (UTC)"
+    print_row "" "--------" "------" "" "----" "-------" "-------" "----------" "" "" "" "" "" "------------" "---------------" "-------------" "------------------"
 
     local has_results=0
 
@@ -828,6 +847,8 @@ print_results() {
         local first_author="${RESULT_FIRST_AUTHOR[$i]}"
         time_label "${RESULT_CREATED[$i]}"
         local created="$TIME_LABEL"
+        time_label "${RESULT_FIRST_COMMIT_DATE[$i]}"
+        local first_commit="$TIME_LABEL"
 
         case "$status" in
             affected | not_affected | unchecked | found) row_group="FOUND" ;;
@@ -858,29 +879,29 @@ print_results() {
         # With --affected, the color of the version and a "*" at the end show
         # whether it is affected. Not affected rows do not count as results.
         if [[ "$status" == "affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$conflict" "" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
         elif [[ "$status" == "unchecked" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$conflict" "" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
             has_results=1
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
             row_note "$i"
-            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
             has_results=1
         elif [[ "$status" == "filename_match" ]]; then
-            print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
             row_note "$i"
-            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
             has_results=1
         elif [[ "$status" == "listed" ]]; then
-            print_row "$NC" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created"
+            print_row "$NC" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed" "$first_author" "$created" "$first_commit"
             has_results=1
         fi
     done

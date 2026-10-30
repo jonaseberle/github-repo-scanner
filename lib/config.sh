@@ -53,6 +53,8 @@ TOPICS_SHOW=0
 SHOW_VISIBILITY=0
 # --show-first-author: a column with the author of the first commit.
 SHOW_FIRST_AUTHOR=0
+# --show-first-commit-date: a column with the time of the first commit.
+SHOW_FIRST_COMMIT_DATE=0
 # --show-pushed: the PUSHED column without --sort=pushed.
 SHOW_PUSHED=0
 # --show-created: a column with the creation time of the repository.
@@ -152,7 +154,11 @@ CURRENT_PUSHED=""
 declare -a RESULT_CREATED=()
 # The creation of the repository that is scanned now, for record_result.
 CURRENT_CREATED=""
-# The author of the first commit (see first_author_label), or empty.
+# The time of the first commit ("2026-10-22T18:53:33Z"), "?" if unknown, or empty.
+declare -a RESULT_FIRST_COMMIT_DATE=()
+# The time of the first commit of the repository that is scanned now, for record_result.
+CURRENT_FIRST_COMMIT_DATE=""
+# The author of the first commit (see first_commit_labels), or empty.
 declare -a RESULT_FIRST_AUTHOR=()
 # The author of the first commit of the repository that is scanned now, for record_result.
 CURRENT_FIRST_AUTHOR=""

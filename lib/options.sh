@@ -126,6 +126,13 @@ ${BOLD}OPTIONS:${NC}
                         "[fork]": its first commit is from the upstream.
                         Costs 2 GraphQL requests per 20 repositories once
 
+    --show-first-commit-date
+                        Optional: add a column FIRST COMMIT (UTC) with the
+                        commit time of the first commit of the default branch.
+                        The committer's clock sets it. A fork shows the first
+                        commit of the upstream. Costs the same requests as
+                        --show-first-author, and nothing more with both
+
     --show-pushed       Optional: add a column PUSHED (UTC) with the last push
                         to any branch, as with --sort=pushed, and keep the
                         order of --sort
@@ -343,6 +350,9 @@ parse_args() {
                 ;;
             --show-first-author)
                 SHOW_FIRST_AUTHOR=1
+                ;;
+            --show-first-commit-date)
+                SHOW_FIRST_COMMIT_DATE=1
                 ;;
             --show-pushed)
                 SHOW_PUSHED=1

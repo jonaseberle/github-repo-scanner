@@ -77,6 +77,7 @@ record_result() {
     RESULT_PUSHED+=("$CURRENT_PUSHED")
     RESULT_CREATED+=("$CURRENT_CREATED")
     RESULT_FIRST_AUTHOR+=("$CURRENT_FIRST_AUTHOR")
+    RESULT_FIRST_COMMIT_DATE+=("$CURRENT_FIRST_COMMIT_DATE")
     RESULT_ARCHIVED+=("$CURRENT_ARCHIVED")
     RESULT_VERSIONS+=("$version_str")
     RESULT_STATUS+=("$status")
@@ -245,10 +246,15 @@ scan_repos() {
         if [[ $SHOW_CREATED -eq 1 ]]; then
             CURRENT_CREATED="${created/#-/?}"
         fi
-        CURRENT_FIRST_AUTHOR=""
-        if [[ $SHOW_FIRST_AUTHOR -eq 1 ]]; then
-            first_author_label "$repo_name"
-            CURRENT_FIRST_AUTHOR="$FIRST_AUTHOR_LABEL"
+        CURRENT_FIRST_AUTHOR="" CURRENT_FIRST_COMMIT_DATE=""
+        if [[ $SHOW_FIRST_AUTHOR -eq 1 || $SHOW_FIRST_COMMIT_DATE -eq 1 ]]; then
+            first_commit_labels "$repo_name"
+            if [[ $SHOW_FIRST_AUTHOR -eq 1 ]]; then
+                CURRENT_FIRST_AUTHOR="$FIRST_AUTHOR_LABEL"
+            fi
+            if [[ $SHOW_FIRST_COMMIT_DATE -eq 1 ]]; then
+                CURRENT_FIRST_COMMIT_DATE="$FIRST_COMMIT_DATE"
+            fi
         fi
         CURRENT_ARCHIVED=0
         if [[ "$is_archived" == "true" ]]; then

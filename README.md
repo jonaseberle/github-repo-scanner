@@ -108,6 +108,9 @@ Options (values only in the form --option=value):
   --show-first-author Optional: add a column with the author of the first
                       commit of the default branch (GitHub does not store who
                       created a repo). A fork shows "[fork]"
+  --show-first-commit-date
+                      Optional: add a column with the time of the first
+                      commit of the default branch
   --show-pushed       Optional: add a column with the last push to any branch
   --show-created      Optional: add a column with the creation of the repo on
                       GitHub (for an imported repo: the import, for a fork:

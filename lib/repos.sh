@@ -245,7 +245,7 @@ FIRST_COMMIT_BATCH=20
 # repositories without an entry. GitHub does not store who created a
 # repository: the author of the first commit is the closest value.
 prefetch_first_commits() {
-    if [[ $SHOW_FIRST_AUTHOR -eq 0 || $OFFLINE -eq 1 ]]; then
+    if [[ ($SHOW_FIRST_AUTHOR -eq 0 && $SHOW_FIRST_COMMIT_DATE -eq 0) || $OFFLINE -eq 1 ]]; then
         return 0
     fi
     local name pending="" chunk="" count=0 chunk_count=0 done_count=0
@@ -363,18 +363,22 @@ first_commit_batch() {
     log INFO "First commits: $written written to the cache"
 }
 
-# Set FIRST_AUTHOR_LABEL to the author of the first commit of repository $1,
-# from the cache: "name (login)", or the one GitHub knows. A fork gets
-# "[fork]". "?" without a cache entry.
-# A variable, not output: like time_label.
-first_author_label() {
+# Set FIRST_AUTHOR_LABEL and FIRST_COMMIT_DATE to the author and the time of
+# the first commit of repository $1, from the cache. The author: "name
+# (login)", or the one GitHub knows. A fork gets "[fork]". "?" without a
+# cache entry.
+# Variables, not output: like time_label. One jq for both.
+first_commit_labels() {
     local file="$CACHE_DIR/api/repos/$OWNER/$1/first-commit"
+    FIRST_AUTHOR_LABEL="?" FIRST_COMMIT_DATE="?"
     if [[ ! -f "$file" ]]; then
-        FIRST_AUTHOR_LABEL="?"
         return 0
     fi
-    FIRST_AUTHOR_LABEL=$(jq --raw-output '
+    # The time first: read joins adjacent tabs, and the author can be empty.
+    IFS=$'\t' read -r FIRST_COMMIT_DATE FIRST_AUTHOR_LABEL < <(jq --raw-output '
         (.name // "") as $name | (.login // "") as $login
-        | (if $login == "" then $name elif $name == "" or $name == $login then $login else "\($name) (\($login))" end)
-          + (if .fork then " [fork]" else "" end)' "$file" 2> /dev/null) || FIRST_AUTHOR_LABEL="?"
+        | [.date // "?",
+           (if $login == "" then $name elif $name == "" or $name == $login then $login else "\($name) (\($login))" end)
+           + (if .fork then " [fork]" else "" end)]
+        | @tsv' "$file" 2> /dev/null) || FIRST_AUTHOR_LABEL="?" FIRST_COMMIT_DATE="?"
 }
