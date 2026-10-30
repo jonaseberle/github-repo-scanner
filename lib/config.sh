@@ -51,6 +51,8 @@ TOPICS_FILTER=""
 # 1 with --topics, with or without a regex: the rows show the topics.
 TOPICS_SHOW=0
 SHOW_VISIBILITY=0
+# --show-first-author: a column with the author of the first commit.
+SHOW_FIRST_AUTHOR=0
 # --sort: "name", or "pushed" (newest push first, with a PUSHED column).
 SORT="name"
 # 1 without --packages and --filename-match: list the repositories only.
@@ -141,6 +143,10 @@ CURRENT_TOPICS=""
 declare -a RESULT_PUSHED=()
 # The last push of the repository that is scanned now, for record_result.
 CURRENT_PUSHED=""
+# The author of the first commit (see first_author_label), or empty.
+declare -a RESULT_FIRST_AUTHOR=()
+# The author of the first commit of the repository that is scanned now, for record_result.
+CURRENT_FIRST_AUTHOR=""
 # 1 for a row of an archived repository: it is in a group of its own.
 declare -a RESULT_ARCHIVED=()
 CURRENT_ARCHIVED=0

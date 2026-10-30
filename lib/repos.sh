@@ -211,7 +211,8 @@ fetch_repo_list() {
 
 # Delete the cache entries of each repository that are older than its last
 # push. Entries written after the push stay, also those of a parallel scan.
-# Entries below commit/ stay: a commit never changes.
+# Entries below commit/ stay: a commit never changes. first-commit stays: a
+# push does not change the first commit.
 refresh_pushed_repos() {
     local name pushed_at dir stamp outdated reference
     reference=$(mktemp)
@@ -225,12 +226,154 @@ refresh_pushed_repos() {
         stamp="${stamp%Z}"
         TZ=UTC touch -t "${stamp:0:12}.${stamp:12:2}" "$reference"
         # Short option: BSD wc (macOS) has no --lines.
-        outdated=$(find "$dir" -path "$dir/commit" -prune -o -type f ! -newer "$reference" -print | wc -l)
+        outdated=$(find "$dir" \( -path "$dir/commit" -o -path "$dir/first-commit" \) -prune -o -type f ! -newer "$reference" -print | wc -l)
         if [[ $outdated -gt 0 ]]; then
-            find "$dir" -path "$dir/commit" -prune -o -type f ! -newer "$reference" -exec rm -f {} +
+            find "$dir" \( -path "$dir/commit" -o -path "$dir/first-commit" \) -prune -o -type f ! -newer "$reference" -exec rm -f {} +
             REFRESHED_COUNT=$((REFRESHED_COUNT + 1))
             log INFO "Cache of $OWNER/$name: $((outdated)) entries older than the push at $pushed_at removed"
         fi
     done < <(echo "$REPOS_DATA" | jq -r '.[] | "\(.name)\t\(.pushedAt // "")"')
     rm -f "$reference"
+}
+
+# Repositories per GraphQL request for the first commits.
+FIRST_COMMIT_BATCH=20
+
+# Write the first commit of the default branch of each repository to the
+# cache entry first-commit (JSON: oid, date, name, login, fork). Only for
+# repositories without an entry. GitHub does not store who created a
+# repository: the author of the first commit is the closest value.
+prefetch_first_commits() {
+    if [[ $SHOW_FIRST_AUTHOR -eq 0 || $OFFLINE -eq 1 ]]; then
+        return 0
+    fi
+    local name pending="" chunk="" count=0 chunk_count=0 done_count=0
+    while IFS= read -r name; do
+        if [[ $USE_CACHE -eq 1 && -f "$CACHE_DIR/api/repos/$OWNER/$name/first-commit" ]]; then
+            continue
+        fi
+        pending+="$name"$'\n'
+        count=$((count + 1))
+    done < <(echo "$REPOS_DATA" | jq -r '.[].name')
+    if [[ $count -eq 0 ]]; then
+        return 0
+    fi
+
+    log INFO "First commits: $count repositories"
+    while IFS= read -r name; do
+        if [[ -z "$name" ]]; then
+            continue
+        fi
+        chunk+="$name"$'\n'
+        chunk_count=$((chunk_count + 1))
+        if [[ $chunk_count -ge $FIRST_COMMIT_BATCH ]]; then
+            print_progress "" "Fetching the first commits: " "$CYAN" "$done_count/$count" "" " repositories"
+            first_commit_batch "$chunk"
+            done_count=$((done_count + chunk_count))
+            chunk="" chunk_count=0
+        fi
+    done <<< "$pending"
+    if [[ $chunk_count -gt 0 ]]; then
+        print_progress "" "Fetching the first commits: " "$CYAN" "$done_count/$count" "" " repositories"
+        first_commit_batch "$chunk"
+    fi
+    clear_progress
+}
+
+# Send the GraphQL query $1 and write the response to the file $2. Return 1
+# if it has no data. Errors of single repositories (e.g. no access) leave
+# their field null.
+first_commit_query() {
+    # gh writes the body (one line) to stdout, then "gh: <messages>" to
+    # stderr. gh_request joins both: cut off the messages.
+    gh_request api graphql -f query="$1" | head -n 1 | sed -e 's/\(.*}\)gh: .*$/\1/' >| "$2" || true
+    if ! jq --exit-status '.data != null' "$2" &> /dev/null; then
+        log WARN "First commits: request failed: $(head -c 300 "$2")"
+        return 1
+    fi
+}
+
+# Fetch the first commits of the repositories $1 (one name per line) with
+# two GraphQL requests, and write them to the cache. A repository without an
+# answer gets no entry: the scan shows "?", the next scan tries again.
+first_commit_batch() {
+    local response query lines kind name rest written=0
+    response=$(mktemp)
+
+    # 1: the head of the default branch, its author and the number of commits.
+    query=$(jq --null-input --raw-output --arg names "$1" --arg owner "$OWNER" '
+        [$names | split("\n")[] | select(length > 0)] as $names
+        | "query { "
+          + ([range($names | length) as $i
+              | "r\($i): repository(owner: \($owner | @json), name: \($names[$i] | @json)) { isFork defaultBranchRef { target { ... on Commit { oid committedDate author { name user { login } } history(first: 1) { totalCount } } } } }"]
+             | join(" "))
+          + " }"')
+    if ! first_commit_query "$query" "$response"; then
+        rm -f "$response"
+        return 0
+    fi
+    # "done<TAB>name<TAB>entry" for a repository with one commit, else
+    # "more<TAB>name<TAB>head<TAB>number of commits<TAB>fork".
+    lines=$(jq --raw-output --arg names "$1" '
+        [$names | split("\n")[] | select(length > 0)] as $names
+        | range($names | length) as $i
+        | .data["r\($i)"] as $repo
+        | ($repo.defaultBranchRef.target // null) as $head
+        | select($head != null and $head.oid != null)
+        | if $head.history.totalCount == 1 then
+              ["done", $names[$i], ({oid: $head.oid, date: $head.committedDate, name: $head.author.name, login: $head.author.user.login, fork: $repo.isFork} | tojson)]
+          else
+              ["more", $names[$i], $head.oid, ($head.history.totalCount | tostring), ($repo.isFork | tostring)]
+          end
+        | join("\t")' "$response")
+
+    # 2: the last commit of the history of the head, the first one. The
+    # cursor "<oid> <n>" points at the commit n (from 0) of the history. Not
+    # documented by GitHub, but stable for years.
+    local more
+    more=$(printf '%s\n' "$lines" | grep --extended-regexp '^more'$'\t' || true)
+    if [[ -n "$more" ]]; then
+        query=$(jq --null-input --raw-output --arg more "$more" --arg owner "$OWNER" '
+            [$more | split("\n")[] | select(length > 0) | split("\t")] as $lines
+            | "query { "
+              + ([range($lines | length) as $i | $lines[$i] as $r
+                  | "r\($i): repository(owner: \($owner | @json), name: \($r[1] | @json)) { object(oid: \($r[2] | @json)) { ... on Commit { history(first: 1, after: \("\($r[2]) \(($r[3] | tonumber) - 2)" | @json)) { nodes { oid committedDate author { name user { login } } } } } } }"]
+                 | join(" "))
+              + " }"')
+        if first_commit_query "$query" "$response"; then
+            lines+=$'\n'$(jq --raw-output --arg more "$more" '
+                [$more | split("\n")[] | select(length > 0) | split("\t")] as $lines
+                | range($lines | length) as $i
+                | $lines[$i] as $r
+                | (.data["r\($i)"].object.history.nodes[0] // null) as $first
+                | select($first != null)
+                | ["done", $r[1], ({oid: $first.oid, date: $first.committedDate, name: $first.author.name, login: $first.author.user.login, fork: ($r[4] == "true")} | tojson)]
+                | join("\t")' "$response")
+        fi
+    fi
+    rm -f "$response"
+
+    while IFS=$'\t' read -r kind name rest; do
+        if [[ "$kind" == "done" ]]; then
+            write_cache_entry "$CACHE_DIR/api/repos/$OWNER/$name/first-commit" "$rest"
+            written=$((written + 1))
+        fi
+    done <<< "$lines"
+    log INFO "First commits: $written written to the cache"
+}
+
+# Set FIRST_AUTHOR_LABEL to the author of the first commit of repository $1,
+# from the cache: "name (login)", or the one GitHub knows. A fork gets
+# "[fork]". "?" without a cache entry.
+# A variable, not output: like pushed_label.
+first_author_label() {
+    local file="$CACHE_DIR/api/repos/$OWNER/$1/first-commit"
+    if [[ ! -f "$file" ]]; then
+        FIRST_AUTHOR_LABEL="?"
+        return 0
+    fi
+    FIRST_AUTHOR_LABEL=$(jq --raw-output '
+        (.name // "") as $name | (.login // "") as $login
+        | (if $login == "" then $name elif $name == "" or $name == $login then $login else "\($name) (\($login))" end)
+          + (if .fork then " [fork]" else "" end)' "$file" 2> /dev/null) || FIRST_AUTHOR_LABEL="?"
 }

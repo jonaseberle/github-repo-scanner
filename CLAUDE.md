@@ -56,7 +56,7 @@ A bash script (`gh-dep-scanner.sh` with its modules in `lib/`) that scans GitHub
 3. **lib/github.sh** - `gh` requests: cache, locks, retries
 4. **lib/rate-limit.sh** - Rate limit check, pacing and waits
 5. **lib/options.sh** - Help, prerequisites, options (`--option=value` only) and the GitHub URL
-6. **lib/repos.sh** - REST repository list, updated from the cache by push and update time
+6. **lib/repos.sh** - REST repository list, updated from the cache by push and update time; first commits (GraphQL)
 7. **lib/branches.sh** - Branches with their status (ahead/behind the default branch)
 8. **lib/files.sh** - Dependency files by commit, file lists, GraphQL prefetch
 9. **lib/ranges.sh** - Version ranges in npm and Composer syntax as intervals, their overlap

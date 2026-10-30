@@ -75,6 +75,7 @@ record_result() {
     RESULT_PACKAGES+=("$5")
     RESULT_TOPICS+=("$CURRENT_TOPICS")
     RESULT_PUSHED+=("$CURRENT_PUSHED")
+    RESULT_FIRST_AUTHOR+=("$CURRENT_FIRST_AUTHOR")
     RESULT_ARCHIVED+=("$CURRENT_ARCHIVED")
     RESULT_VERSIONS+=("$version_str")
     RESULT_STATUS+=("$status")
@@ -239,6 +240,11 @@ scan_repos() {
             CURRENT_TOPICS="$topics"
         fi
         CURRENT_PUSHED="${pushed#-}"
+        CURRENT_FIRST_AUTHOR=""
+        if [[ $SHOW_FIRST_AUTHOR -eq 1 ]]; then
+            first_author_label "$repo_name"
+            CURRENT_FIRST_AUTHOR="$FIRST_AUTHOR_LABEL"
+        fi
         CURRENT_ARCHIVED=0
         if [[ "$is_archived" == "true" ]]; then
             CURRENT_ARCHIVED=1

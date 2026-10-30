@@ -105,6 +105,9 @@ Options (values only in the form --option=value):
                       jspm_packages/, web_modules/, vendor/, .yarn/,
                       .pnpm-store/)
   --show-visibility   Optional: add a column with the repo visibility
+  --show-first-author Optional: add a column with the author of the first
+                      commit of the default branch (GitHub does not store who
+                      created a repo). A fork shows "[fork]"
   --archived[=mode]   Optional: "hide" (default), "show" (in groups of their
                       own, e.g. "ARCHIVED: FOUND") or "only" the archived
                       repos; without a mode: show
@@ -288,6 +291,14 @@ Without `--packages`, no file is fetched:
   --type=composer \
   --packages='^livewire/livewire$' \
   --show-visibility
+```
+
+### Show the author of the first commit of each repository
+
+```bash
+./gh-dep-scanner.sh \
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --show-first-author
 ```
 
 ### Fetch everything again

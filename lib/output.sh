@@ -120,6 +120,10 @@ write_markdown() {
         header+=" Pushed (UTC) |"
         line+="---|"
     fi
+    if show_first_author_column; then
+        header+=" First commit by |"
+        line+="---|"
+    fi
     if [[ $SHOW_VISIBILITY -eq 1 ]]; then
         header+=" Visibility |"
         line+="---|"
@@ -187,6 +191,9 @@ write_markdown() {
         if show_pushed_column; then
             pushed_label "${RESULT_PUSHED[$i]}"
             row+=" $PUSHED_LABEL |"
+        fi
+        if show_first_author_column; then
+            row+=" $(markdown_cell "${RESULT_FIRST_AUTHOR[$i]}") |"
         fi
         if [[ $SHOW_VISIBILITY -eq 1 ]]; then
             row+=" ${RESULT_VISIBILITY[$i]} |"

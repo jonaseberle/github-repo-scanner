@@ -119,6 +119,13 @@ ${BOLD}OPTIONS:${NC}
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
 
+    --show-first-author Optional: add a column FIRST COMMIT BY with the author
+                        of the first commit of the default branch: the git
+                        name, and the GitHub login if GitHub knows it. GitHub
+                        does not store who created a repository. A fork shows
+                        "[fork]": its first commit is from the upstream.
+                        Costs 2 GraphQL requests per 20 repositories once
+
     --archived[=mode]   Optional: the archived repositories:
                           hide  skip them (default)
                           show  scan them too, in groups of their own
@@ -325,6 +332,9 @@ parse_args() {
                 ;;
             --show-visibility)
                 SHOW_VISIBILITY=1
+                ;;
+            --show-first-author)
+                SHOW_FIRST_AUTHOR=1
                 ;;
             --sort=*)
                 SORT="${1#*=}"
