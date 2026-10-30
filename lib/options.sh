@@ -119,6 +119,13 @@ ${BOLD}OPTIONS:${NC}
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
 
+    --archived[=mode]   Optional: the archived repositories:
+                          hide  skip them (default)
+                          show  scan them too, in groups of their own
+                                (e.g. "ARCHIVED: FOUND")
+                          only  scan only them
+                        Without a mode: show.
+
     --sort=<order>      Optional: the order of the rows in each group:
                           name    by URL (default)
                           pushed  by the last push to any branch, newest
@@ -321,6 +328,12 @@ parse_args() {
                 ;;
             --sort=*)
                 SORT="${1#*=}"
+                ;;
+            --archived=*)
+                ARCHIVED="${1#*=}"
+                ;;
+            --archived)
+                ARCHIVED="show"
                 ;;
             --output-text=*)
                 OUTPUT_TEXT="${1#*=}"

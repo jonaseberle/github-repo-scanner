@@ -16,7 +16,7 @@ This script fills that gap.
 
 ## Features
 
-- Scans all repositories in a GitHub organization or personal account (archived repositories are skipped)
+- Scans all repositories in a GitHub organization or personal account (archived repositories only with `--archived`)
 - Supports **Composer** (PHP) and **Node** (JavaScript) dependencies
 - Reads the installed Composer version from `composer.lock` (or the constraint from `composer.json` with `--type=composerJson`)
 - Reads the installed Node version from `package-lock.json` or `yarn.lock` (or the constraint from `package.json` with `--type=nodeJson`)
@@ -105,6 +105,9 @@ Options (values only in the form --option=value):
                       jspm_packages/, web_modules/, vendor/, .yarn/,
                       .pnpm-store/)
   --show-visibility   Optional: add a column with the repo visibility
+  --archived[=mode]   Optional: "hide" (default), "show" (in groups of their
+                      own, e.g. "ARCHIVED: FOUND") or "only" the archived
+                      repos; without a mode: show
   --sort=<order>      Optional: order of the rows in each group: "name"
                       (default) or "pushed" (last push to any branch, newest
                       first, with a column PUSHED). Without --packages and
@@ -366,7 +369,7 @@ https://github.com/YOUR_ORG/marketing-site                                 N/A
 ==========================================================================================
 Summary:
   - Total repos scanned: 5
-  - Archived repos: 1
+  - Archived repos: 1 (skipped, see --archived)
   - Packages affected: 2
   - Repos without composer.lock: 1
   - Files without packages matching ^typo3/cms-core$: 1

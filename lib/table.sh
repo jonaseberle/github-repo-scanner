@@ -640,7 +640,7 @@ print_row() {
 }
 
 # Set ORDERED_ROWS to the numbers of the shown rows, in the order of the
-# table: by group, then (with --sort=pushed) by the last push, newest first,
+# table: by group (the groups of archived repositories last), then (with --sort=pushed) by the last push, newest first,
 # then by URL, branch, path and package.
 ordered_rows() {
     # Sort the rows by URL, branch, path and package. The index is the last field.
@@ -670,16 +670,22 @@ ordered_rows() {
         found_statuses="affected unchecked not_affected"
     fi
     ORDERED_ROWS=""
-    for wanted_status in $found_statuses filename_match not_in_file no_file error listed; do
-        # See row_shown.
-        if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
-            continue
-        fi
-        for i in $sorted_rows; do
-            # FOUND has all rows with a version, affected by --affected or not.
-            if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" || ( "$wanted_status" == "found" && "${RESULT_STATUS[$i]}" =~ ^(not_)?affected$|^unchecked$ ) ]]; then
-                ORDERED_ROWS+=" $i"
+    local archived
+    for archived in 0 1; do
+        for wanted_status in $found_statuses filename_match not_in_file no_file error listed; do
+            # See row_shown.
+            if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
+                continue
             fi
+            for i in $sorted_rows; do
+                if [[ ${RESULT_ARCHIVED[$i]} -ne $archived ]]; then
+                    continue
+                fi
+                # FOUND has all rows with a version, affected by --affected or not.
+                if [[ "${RESULT_STATUS[$i]}" == "$wanted_status" || ( "$wanted_status" == "found" && "${RESULT_STATUS[$i]}" =~ ^(not_)?affected$|^unchecked$ ) ]]; then
+                    ORDERED_ROWS+=" $i"
+                fi
+            done
         done
     done
 
@@ -751,6 +757,11 @@ print_results() {
                 unchecked) row_group="NOT CHECKED (no version range)" ;;
                 not_affected) row_group="NOT AFFECTED" ;;
             esac
+        fi
+        if [[ ${RESULT_ARCHIVED[$i]} -eq 1 && "$status" == "listed" ]]; then
+            row_group="ARCHIVED"
+        elif [[ ${RESULT_ARCHIVED[$i]} -eq 1 ]]; then
+            row_group="ARCHIVED: $row_group"
         fi
         if [[ "$row_group" != "$group" ]]; then
             group="$row_group"
@@ -826,8 +837,13 @@ print_results() {
             echo "  - Merged branches: shown (hide them with --hide-merged)"
         fi
     fi
-    if [[ -n "$ARCHIVED_COUNT" ]]; then
+    if [[ -n "$ARCHIVED_COUNT" && "$ARCHIVED" == "hide" ]]; then
+        echo "  - Archived repos: $ARCHIVED_COUNT (skipped, see --archived)"
+    elif [[ -n "$ARCHIVED_COUNT" ]]; then
         echo "  - Archived repos: $ARCHIVED_COUNT"
+    fi
+    if [[ "$ARCHIVED" == "only" && "$OWNER_TYPE" != "repo" ]]; then
+        echo "  - Repos not archived: $NOT_ARCHIVED_COUNT (skipped)"
     fi
     if [[ $OFFLINE -eq 1 ]]; then
         echo "  - Cache: offline (pushes are not checked)"

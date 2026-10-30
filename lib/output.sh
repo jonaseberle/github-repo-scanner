@@ -147,6 +147,11 @@ write_markdown() {
                 not_affected) row_group="Not affected" ;;
             esac
         fi
+        if [[ ${RESULT_ARCHIVED[$i]} -eq 1 && "${RESULT_STATUS[$i]}" == "listed" ]]; then
+            row_group="Archived"
+        elif [[ ${RESULT_ARCHIVED[$i]} -eq 1 ]]; then
+            row_group="Archived: $row_group"
+        fi
         if [[ "$row_group" != "$group" ]]; then
             group="$row_group"
             printf '\n## %s\n\n%s\n%s\n' "$group" "$header" "$line"

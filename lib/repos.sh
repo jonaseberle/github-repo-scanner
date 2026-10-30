@@ -12,7 +12,7 @@ fetch_repos() {
         if [[ $OFFLINE -eq 1 ]]; then
             view=gh_cached
         fi
-        repos_json=$("$view" "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,defaultBranchRef,pushedAt,repositoryTopics \
+        repos_json=$("$view" "repo-view/$OWNER/$REPO" repo view "$OWNER/$REPO" --json name,url,isPrivate,isArchived,defaultBranchRef,pushedAt,repositoryTopics \
             --jq '[. + {topics: [.repositoryTopics[]?.name]} | del(.repositoryTopics)]') || {
             print_error "Failed to fetch repository: $OWNER/$REPO"
             exit 1
@@ -24,10 +24,17 @@ fetch_repos() {
         }
     fi
 
-    # The list has the archived repositories too: count them, then skip them.
+    # The list has the archived repositories too: count them, then keep them
+    # as --archived says. A single repository is scanned in any case.
     if [[ "$OWNER_TYPE" != "repo" ]]; then
         ARCHIVED_COUNT=$(echo "$repos_json" | jq '[.[] | select(.isArchived)] | length')
-        repos_json=$(echo "$repos_json" | jq '[.[] | select(.isArchived | not)]')
+        case "$ARCHIVED" in
+            hide) repos_json=$(echo "$repos_json" | jq '[.[] | select(.isArchived | not)]') ;;
+            only)
+                NOT_ARCHIVED_COUNT=$(echo "$repos_json" | jq '[.[] | select(.isArchived | not)] | length')
+                repos_json=$(echo "$repos_json" | jq '[.[] | select(.isArchived)]')
+                ;;
+        esac
     fi
 
     # Filter with bash, not jq: jq regular expressions are not POSIX extended ones.
@@ -71,7 +78,7 @@ fetch_repos() {
         exit 0
     fi
 
-    log INFO "Repositories of $OWNER_TYPE $OWNER: $TOTAL_REPOS to scan, ${ARCHIVED_COUNT:-0} archived, $FILTERED_OUT_COUNT not matching --repo, $TOPICS_FILTERED_OUT_COUNT not matching --topics"
+    log INFO "Repositories of $OWNER_TYPE $OWNER: $TOTAL_REPOS to scan, ${ARCHIVED_COUNT:-0} archived (--archived=$ARCHIVED), $FILTERED_OUT_COUNT not matching --repo, $TOPICS_FILTERED_OUT_COUNT not matching --topics"
     print_success "Found $TOTAL_REPOS repositories."
 }
 

@@ -55,6 +55,8 @@ SHOW_VISIBILITY=0
 SORT="name"
 # 1 without --packages and --filename-match: list the repositories only.
 LIST_ONLY=0
+# --archived: "hide", "show" or "only" the archived repositories.
+ARCHIVED="hide"
 # --output-text, --output-md, --output-html, --output-pdf: the files for the
 # results, and their width in columns.
 OUTPUT_TEXT=""
@@ -139,6 +141,9 @@ CURRENT_TOPICS=""
 declare -a RESULT_PUSHED=()
 # The last push of the repository that is scanned now, for record_result.
 CURRENT_PUSHED=""
+# 1 for a row of an archived repository: it is in a group of its own.
+declare -a RESULT_ARCHIVED=()
+CURRENT_ARCHIVED=0
 declare -a RESULT_STATUS=()
 
 # Counters
@@ -164,3 +169,5 @@ TOPICS_FILTERED_OUT_COUNT=0
 REFRESHED_COUNT=0
 # Stays empty for a single repository.
 ARCHIVED_COUNT=""
+# With --archived=only: the repositories that are not archived.
+NOT_ARCHIVED_COUNT=0
