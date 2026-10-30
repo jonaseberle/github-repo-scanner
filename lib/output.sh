@@ -49,6 +49,8 @@ output_path() {
         local packages="$PACKAGES"
         if [[ "$packages" == "." ]]; then
             packages="all-packages"
+        elif [[ $LIST_ONLY -eq 1 ]]; then
+            packages="repositories"
         fi
         path=$(printf '%s_%s' "$OWNER${REPO:+_$REPO}" "$packages" | awk '{
             gsub(/[^A-Za-z0-9._-]+/, "-"); gsub(/-+/, "-"); gsub(/^[-.]+|-+$/, ""); gsub(/-_|_-/, "_"); print }').$2
@@ -110,8 +112,14 @@ write_markdown() {
         header+=" Path |"
         line+="---|"
     fi
-    header+=" Package | Version |"
-    line+="---|---|"
+    if show_package_columns; then
+        header+=" Package | Version |"
+        line+="---|---|"
+    fi
+    if show_pushed_column; then
+        header+=" Pushed (UTC) |"
+        line+="---|"
+    fi
     if [[ $SHOW_VISIBILITY -eq 1 ]]; then
         header+=" Visibility |"
         line+="---|"
@@ -129,6 +137,7 @@ write_markdown() {
             filename_match) row_group="File name match ($(markdown_cell "$FILENAME_MATCH"))" ;;
             not_in_file) row_group="Package not found" ;;
             no_file) row_group="Version file not found (${dep_file_name// /, })" ;;
+            listed) row_group="Repositories" ;;
             *) row_group="Parse error" ;;
         esac
         if [[ $GROUP_BY_AFFECTED -eq 1 ]]; then
@@ -167,7 +176,13 @@ write_markdown() {
             fi
             row+=" $(markdown_cell "$path") |"
         fi
-        row+=" $(markdown_cell "${RESULT_PACKAGES[$i]}") | $(markdown_cell "${RESULT_VERSIONS[$i]}") |"
+        if show_package_columns; then
+            row+=" $(markdown_cell "${RESULT_PACKAGES[$i]}") | $(markdown_cell "${RESULT_VERSIONS[$i]}") |"
+        fi
+        if show_pushed_column; then
+            pushed_label "${RESULT_PUSHED[$i]}"
+            row+=" $PUSHED_LABEL |"
+        fi
         if [[ $SHOW_VISIBILITY -eq 1 ]]; then
             row+=" ${RESULT_VISIBILITY[$i]} |"
         fi

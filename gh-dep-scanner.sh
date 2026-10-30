@@ -77,9 +77,9 @@ main() {
         missing=1
     fi
     # --filename-match alone checks only the file names: no --packages, no --type.
+    # Without both, only the repositories are listed.
     if [[ -z "$PACKAGES" && -z "$FILENAME_MATCH" ]]; then
-        print_error "--packages is required: --packages=<regex>, or --packages for all packages (or --filename-match alone)."
-        missing=1
+        LIST_ONLY=1
     fi
     if [[ -z "$TYPE" && -n "$PACKAGES" ]]; then
         print_error "--type is required: composer, composerJson, node, nodeJson or nodeEngines."
@@ -117,6 +117,16 @@ main() {
         exit 1
     fi
 
+    if [[ $LIST_ONLY -eq 1 && -n "$TYPE$AFFECTED$BRANCH$BRANCHES$ALTERNATIVE_PATHS" ]]; then
+        print_error "--type, --affected, --branch, --branches and --alternativePaths need --packages=<regex> (or --filename-match)."
+        exit 1
+    fi
+
+    if [[ ! "$SORT" =~ ^(name|pushed)$ ]]; then
+        print_error "--sort must be 'name' or 'pushed'."
+        exit 1
+    fi
+
     if [[ -n "$BRANCH" && -n "$BRANCHES" ]]; then
         print_error "Use either --branch or --branches."
         exit 1
@@ -145,7 +155,7 @@ main() {
         print_info "$(rate_limit_summary)"
     fi
 
-    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER topics=$TOPICS_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS excludePaths=$EXCLUDE_PATHS filename-match=$FILENAME_MATCH cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
+    log INFO "Options: url=$URL type=$TYPE packages=$PACKAGES affected=$AFFECTED repo=$REPO_FILTER topics=$TOPICS_FILTER branch=$BRANCH branches=$BRANCHES hide-merged=$HIDE_MERGED hide-unknown=$HIDE_UNKNOWN hide-absent=$HIDE_ABSENT hide-path=$HIDE_PATH alternativePaths=$ALTERNATIVE_PATHS excludePaths=$EXCLUDE_PATHS filename-match=$FILENAME_MATCH sort=$SORT cache=$USE_CACHE offline=$OFFLINE repo-list-max-age=$REPO_LIST_MAX_AGE delay=$DELAY"
 
     # Parse the GitHub URL
     parse_github_url "$URL"

@@ -105,6 +105,10 @@ Options (values only in the form --option=value):
                       jspm_packages/, web_modules/, vendor/, .yarn/,
                       .pnpm-store/)
   --show-visibility   Optional: add a column with the repo visibility
+  --sort=<order>      Optional: order of the rows in each group: "name"
+                      (default) or "pushed" (last push to any branch, newest
+                      first, with a column PUSHED). Without --packages and
+                      --filename-match, only the repos are listed
   --output-text[=file], --output-md[=file], --output-html[=file], --output-pdf[=file]
                       Optional: also write the results to a file, 160 columns
                       wide: plain text, Markdown tables, HTML (white page with
@@ -261,6 +265,16 @@ Without `--packages`, only the file names are checked:
 ./gh-dep-scanner.sh \
   --url="https://github.com/orgs/YOUR_ORG/repositories" \
   --filename-match='(^|/)wp-content/'
+```
+
+### List the repositories by their last push
+
+Without `--packages`, no file is fetched:
+
+```bash
+./gh-dep-scanner.sh \
+  --url="https://github.com/orgs/YOUR_ORG/repositories" \
+  --sort=pushed
 ```
 
 ### Show the visibility of each repository

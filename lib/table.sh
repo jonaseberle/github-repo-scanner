@@ -201,6 +201,14 @@ set_column_widths() {
     if [[ $SHOW_VISIBILITY -eq 1 ]]; then
         available=$((available - 11))
     fi
+    if show_pushed_column; then
+        available=$((available - 1 - PUSHED_WIDTH))
+    fi
+    # The list of repositories has no PACKAGE and VERSION, and so no gaps for them.
+    if ! show_package_columns; then
+        package_width=0 version_width=0
+        available=$((available + 2))
+    fi
 
     if [[ $((url_width + branch_width + path_width + package_width + version_width)) -gt $available ]]; then
         read -r url_width branch_width path_width package_width version_width < <(fit_columns "$available" \
@@ -350,6 +358,28 @@ fit_columns() {
         }'
 }
 
+# The PACKAGE and VERSION columns: not in the list of repositories.
+show_package_columns() {
+    [[ $LIST_ONLY -eq 0 ]]
+}
+
+# The PUSHED column: with --sort=pushed.
+show_pushed_column() {
+    [[ "$SORT" == "pushed" ]]
+}
+
+# The width of a time in the PUSHED column, see pushed_label.
+PUSHED_WIDTH=16
+
+# Set PUSHED_LABEL to the time $1 ("2026-10-22T18:53:33Z") as "2026-10-22 18:53".
+# A variable, not output: no subshell for each row.
+pushed_label() {
+    PUSHED_LABEL="${1:0:10}"
+    if [[ ${#1} -ge 16 ]]; then
+        PUSHED_LABEL+=" ${1:11:5}"
+    fi
+}
+
 # The BRANCH column: only with --branches.
 show_branch_column() {
     [[ -n "$BRANCHES" ]]
@@ -416,7 +446,8 @@ branch_label() {
 # Arguments: color, URL, branch, branch status (see branch_label), path, package, version,
 # visibility, and optionally the color of the version, a mark for the end
 # of the row, 1 for a conflict (a yellow "!" after the path), the note
-# of row_note before the URL and the topics after it.
+# of row_note before the URL, the topics after it, and the time of the
+# PUSHED column (see pushed_label).
 # A path, package or version that is too wide wraps and stays in its column.
 # A URL never wraps: a line break makes it unclickable. A URL that is too
 # wide gets its own line, and the other cells start on the next line.
@@ -425,13 +456,18 @@ branch_label() {
 # or further left if the line is too short.
 print_row() {
     local row_color="$1" url="$2" branch="$3" branch_status="$4" path="$5" package="$6"
-    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}" note="${12:-}" topics="${13:-}"
+    local version="$7" visibility="$8" version_color_arg="${9:-}" mark="${10:-}" conflict="${11:-0}" note="${12:-}" topics="${13:-}" pushed="${14:-}"
     # The URL has the color of the group, the other cells the color of their column.
     # The header (bold) and the dashes (no color) have one color for all cells.
     local branch_color="$COLOR_BRANCH" path_color="$COLOR_PATH" package_color="$COLOR_PACKAGE"
-    local version_color="${version_color_arg:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY"
+    local version_color="${version_color_arg:-$COLOR_VERSION}" visibility_color="$COLOR_VISIBILITY" pushed_color=""
     if [[ -z "$row_color" || "$row_color" == "$BOLD" ]]; then
-        branch_color="$row_color" path_color="$row_color" package_color="$row_color" version_color="$row_color" visibility_color="$row_color"
+        branch_color="$row_color" path_color="$row_color" package_color="$row_color" version_color="$row_color" visibility_color="$row_color" pushed_color="$row_color"
+    fi
+    # A cell after the URL: else the URL is not padded.
+    local url_width=$URL_COLUMN_WIDTH
+    if ! show_package_columns && ! show_branch_column && ! show_path_column && ! show_pushed_column && [[ $SHOW_VISIBILITY -eq 0 ]]; then
+        url_width=0
     fi
     # Before the width checks: set_column_widths counts the label too.
     if [[ -n "$branch_status" ]]; then
@@ -455,6 +491,10 @@ print_row() {
         color_url_cell "$row_color" "$url" "${#note}" "$url_length" "$topics"
         printf "%s\n" "$URL_CELL"
         url_lines=("")
+        # No cell follows the URL: the row is complete.
+        if [[ $url_width -eq 0 ]]; then
+            return 0
+        fi
     fi
     # A branch that is too wide can use the PATH column of a row without a path.
     local spill=0
@@ -503,14 +543,18 @@ print_row() {
             path_lines+=("$line")
         done < <(wrap_path "$PATH_COLUMN_WIDTH" "$path")
     fi
-    if [[ ${#package} -le $PACKAGE_COLUMN_WIDTH ]]; then
+    if ! show_package_columns; then
+        :
+    elif [[ ${#package} -le $PACKAGE_COLUMN_WIDTH ]]; then
         package_lines=("$package")
     else
         while IFS= read -r line; do
             package_lines+=("$line")
         done < <(wrap_path "$PACKAGE_COLUMN_WIDTH" "$package")
     fi
-    if [[ ${#version} -le $VERSION_COLUMN_WIDTH ]]; then
+    if ! show_package_columns; then
+        :
+    elif [[ ${#version} -le $VERSION_COLUMN_WIDTH ]]; then
         version_lines=("$version")
     else
         while IFS= read -r line; do
@@ -535,7 +579,7 @@ print_row() {
     # Pad first, then color: the color codes have no width.
     local i row
     for ((i = 0; i < count; i++)); do
-        printf -v cell "%-*s" "$URL_COLUMN_WIDTH" "${url_lines[$i]:-}"
+        printf -v cell "%-*s" "$url_width" "${url_lines[$i]:-}"
         # Only the first line has the URL, and so the note and the topics. Not
         # if the URL got a line of its own.
         if [[ $i -eq 0 && -n "${url_lines[0]}" ]]; then
@@ -560,18 +604,28 @@ print_row() {
             fi
             row+=" $path_color$cell$NC"
         fi
-        # Color the text only: an underline must not run over the padding.
-        local package_text="${package_lines[$i]:-}"
-        printf -v cell "%-*s" "$PACKAGE_COLUMN_WIDTH" ""
-        row+=" $package_color$package_text$NC${cell:${#package_text}}"
-        if [[ $SHOW_VISIBILITY -eq 1 ]]; then
-            printf -v cell "%-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
-            row+=" $version_color$cell$NC"
-            if [[ $i -eq 0 ]]; then
-                row+=" $visibility_color$visibility$NC"
+        if show_package_columns; then
+            # Color the text only: an underline must not run over the padding.
+            local package_text="${package_lines[$i]:-}"
+            printf -v cell "%-*s" "$PACKAGE_COLUMN_WIDTH" ""
+            row+=" $package_color$package_text$NC${cell:${#package_text}}"
+            # The last cell is not padded.
+            if [[ $SHOW_VISIBILITY -eq 1 ]] || show_pushed_column; then
+                printf -v cell "%-*s" "$VERSION_COLUMN_WIDTH" "${version_lines[$i]:-}"
+                row+=" $version_color$cell$NC"
+            else
+                row+=" $version_color${version_lines[$i]:-}$NC"
             fi
-        else
-            row+=" $version_color${version_lines[$i]:-}$NC"
+        fi
+        if [[ $i -eq 0 ]] && show_pushed_column; then
+            cell="$pushed"
+            if [[ $SHOW_VISIBILITY -eq 1 ]]; then
+                printf -v cell "%-*s" "$PUSHED_WIDTH" "$pushed"
+            fi
+            row+=" $pushed_color$cell$NC"
+        fi
+        if [[ $i -eq 0 && $SHOW_VISIBILITY -eq 1 ]]; then
+            row+=" $visibility_color$visibility$NC"
         fi
         if [[ $i -eq 0 && -n "${mark:-}" ]]; then
             # "*": affected, "?": not checked (no version range).
@@ -586,10 +640,12 @@ print_row() {
 }
 
 # Set ORDERED_ROWS to the numbers of the shown rows, in the order of the
-# table: by group, then by URL, branch, path and package.
+# table: by group, then (with --sort=pushed) by the last push, newest first,
+# then by URL, branch, path and package.
 ordered_rows() {
     # Sort the rows by URL, branch, path and package. The index is the last field.
     # The default branch first: "0" before its name, "1" before the others.
+    # With --sort=pushed, the time of the push first: "0" for none, the last.
     local sorted_rows
     # RESULT_STATUS is added last: after an interrupt, the other arrays can be longer.
     sorted_rows=$(for i in "${!RESULT_STATUS[@]}"; do
@@ -597,8 +653,15 @@ ordered_rows() {
         if [[ "${RESULT_BRANCH_STATUS[$i]}" == "default" ]]; then
             first=0
         fi
+        if show_pushed_column; then
+            printf '%s ' "${RESULT_PUSHED[$i]:-0}"
+        fi
         echo "${RESULT_URLS[$i]} $first${RESULT_BRANCHES[$i]} ${RESULT_PATHS[$i]} ${RESULT_PACKAGES[$i]} $i"
-    done | sort --ignore-case | awk '{ print $NF }')
+    done | if show_pushed_column; then
+        sort --key=1,1r --key=2f
+    else
+        sort --ignore-case
+    fi | awk '{ print $NF }')
 
     # Group the rows: version found, package not found, no file, parse error.
     # A string, not an array: an empty array fails with nounset in bash 3.2 (macOS).
@@ -607,7 +670,7 @@ ordered_rows() {
         found_statuses="affected unchecked not_affected"
     fi
     ORDERED_ROWS=""
-    for wanted_status in $found_statuses filename_match not_in_file no_file error; do
+    for wanted_status in $found_statuses filename_match not_in_file no_file error listed; do
         # See row_shown.
         if [[ ("$wanted_status" == "no_file" && $HIDE_UNKNOWN -eq 1) || ("$wanted_status" == "not_in_file" && $HIDE_ABSENT -eq 1) ]]; then
             continue
@@ -641,15 +704,19 @@ print_results() {
     dep_file_name="${dep_file_name// / or }"
 
     echo ""
-    printf '%s\n' "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${AFFECTED:+ (affected: ${COLOR_VERSION}$AFFECTED${NC})}"
+    if [[ $LIST_ONLY -eq 1 ]]; then
+        printf '%s\n' "${BOLD}Repositories of $OWNER${NC}"
+    else
+        printf '%s\n' "${BOLD}Results: ${NC}$(packages_label)${BOLD} in repositories${NC}${AFFECTED:+ (affected: ${COLOR_VERSION}$AFFECTED${NC})}"
+    fi
     print_divider
     echo ""
 
     # Print header
     hide_single_paths
     set_column_widths
-    print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY"
-    print_row "" "--------" "------" "" "----" "-------" "-------" "----------"
+    print_row "$BOLD" "REPO URL" "BRANCH" "" "PATH" "PACKAGE" "VERSION" "VISIBILITY" "" "" "" "" "" "PUSHED (UTC)"
+    print_row "" "--------" "------" "" "----" "-------" "-------" "----------" "" "" "" "" "" "------------"
 
     local has_results=0
 
@@ -667,12 +734,15 @@ print_results() {
         local conflict="${RESULT_CONFLICT[$i]}"
         local package="${RESULT_PACKAGES[$i]}"
         local topics="${RESULT_TOPICS[$i]}"
+        pushed_label "${RESULT_PUSHED[$i]}"
+        local pushed="$PUSHED_LABEL"
 
         case "$status" in
             affected | not_affected | unchecked | found) row_group="FOUND" ;;
             filename_match) row_group="FILENAME MATCH ($FILENAME_MATCH)" ;;
             not_in_file) row_group="PACKAGE NOT FOUND" ;;
             no_file) row_group="$no_file_group" ;;
+            listed) row_group="REPOSITORIES" ;;
             *) row_group="PARSE ERROR" ;;
         esac
         if [[ $GROUP_BY_AFFECTED -eq 1 ]]; then
@@ -691,33 +761,36 @@ print_results() {
         # With --affected, the color of the version and a "*" at the end show
         # whether it is affected. Not affected rows do not count as results.
         if [[ "$status" == "affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$conflict" "" "$topics"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_AFFECTED" "*" "$conflict" "" "$topics" "$pushed"
             has_results=1
         elif [[ "$status" == "not_affected" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$conflict" "" "$topics"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "$COLOR_NOT_AFFECTED" "" "$conflict" "" "$topics" "$pushed"
         elif [[ "$status" == "unchecked" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$conflict" "" "$topics"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "?" "$conflict" "" "$topics" "$pushed"
             has_results=1
         elif [[ "$status" == "found" ]]; then
-            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics"
+            print_row "$GREEN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed"
             has_results=1
         elif [[ "$status" == "no_file" || "$status" == "error" ]]; then
             row_note "$i"
-            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics"
+            print_row "$YELLOW" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed"
             has_results=1
         elif [[ "$status" == "filename_match" ]]; then
-            print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics"
+            print_row "$BLUE" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed"
             has_results=1
         elif [[ "$status" == "not_in_file" ]]; then
             row_note "$i"
-            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics"
+            print_row "$CYAN" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "$ROW_NOTE" "$topics" "$pushed"
+            has_results=1
+        elif [[ "$status" == "listed" ]]; then
+            print_row "$NC" "$url" "$branch" "$branch_status" "$path" "$package" "$version" "$visibility" "" "" "$conflict" "" "$topics" "$pushed"
             has_results=1
         fi
     done
 
     if [[ ${#RESULT_STATUS[@]} -eq 0 && $SCAN_INTERRUPTED -eq 1 ]]; then
         printf '%s\n' "${YELLOW}No results yet.${NC}"
-    elif [[ -z "$PACKAGES" && $FILENAME_MATCH_COUNT -eq 0 ]]; then
+    elif [[ $LIST_ONLY -eq 0 && -z "$PACKAGES" && $FILENAME_MATCH_COUNT -eq 0 ]]; then
         printf '%s\n' "${YELLOW}No file matches --filename-match '$FILENAME_MATCH'.${NC}"
     elif [[ ${#RESULT_STATUS[@]} -eq 0 && $MERGED_COUNT -gt 0 ]]; then
         printf '%s\n' "${YELLOW}All matching branches are merged (hidden by --hide-merged).${NC}"
@@ -733,6 +806,8 @@ print_results() {
     printf '%s\n' "${BOLD}Summary:${NC}"
     if [[ $SCAN_INTERRUPTED -eq 1 ]]; then
         echo "  - Total repos scanned: $((SCAN_POSITION - 1)) of $TOTAL_REPOS (stopped in repo $SCAN_POSITION)"
+    elif [[ $LIST_ONLY -eq 1 ]]; then
+        echo "  - Repos listed: $TOTAL_REPOS"
     else
         echo "  - Total repos scanned: $TOTAL_REPOS"
     fi

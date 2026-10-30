@@ -21,7 +21,7 @@ on_scan_interrupt() {
 # Classify a package version and add a result row.
 # Arguments: URL, branch, path, visibility, package, and the version or
 # NOT_FOUND (no file) / PARSE_ERROR / NOT_IN_FILE (no matching package) /
-# FILENAME_MATCH:<number of files>.
+# FILENAME_MATCH:<number of files> / LISTED (a row of the list of repositories).
 record_result() {
     local value="$6"
 
@@ -46,6 +46,9 @@ record_result() {
         fi
         status="filename_match"
         FILENAME_MATCH_COUNT=$((FILENAME_MATCH_COUNT + 1))
+    elif [[ "$value" == "LISTED" ]]; then
+        version_str=""
+        status="listed"
     else
         version_str="$value"
         if [[ -z "$AFFECTED" ]]; then
@@ -71,6 +74,7 @@ record_result() {
     RESULT_VISIBILITY+=("$4")
     RESULT_PACKAGES+=("$5")
     RESULT_TOPICS+=("$CURRENT_TOPICS")
+    RESULT_PUSHED+=("$CURRENT_PUSHED")
     RESULT_VERSIONS+=("$version_str")
     RESULT_STATUS+=("$status")
 }
@@ -206,8 +210,14 @@ check_node_versions() {
 
 scan_repos() {
     echo ""
-    printf '%s\n' "${BOLD}Scanning $OWNER repositories for ${NC}$(packages_label)${AFFECTED:+, affected: ${COLOR_VERSION}$AFFECTED${NC}}..."
-    if [[ -n "$BRANCHES" ]]; then
+    if [[ $LIST_ONLY -eq 1 ]]; then
+        printf '%s\n' "${BOLD}Listing $OWNER repositories...${NC}"
+    else
+        printf '%s\n' "${BOLD}Scanning $OWNER repositories for ${NC}$(packages_label)${AFFECTED:+, affected: ${COLOR_VERSION}$AFFECTED${NC}}..."
+    fi
+    if [[ $LIST_ONLY -eq 1 ]]; then
+        :
+    elif [[ -n "$BRANCHES" ]]; then
         printf '%s\n' "Branches: matching ${COLOR_BRANCH}$BRANCHES${NC}"
     elif [[ -n "$BRANCH" ]]; then
         printf '%s\n' "Branch: ${COLOR_BRANCH}$BRANCH${NC}"
@@ -218,8 +228,8 @@ scan_repos() {
 
     trap on_scan_interrupt INT
 
-    local i=0 repo_name repo_url is_private topics default_branch
-    while IFS=$'\t' read -r repo_name repo_url is_private topics default_branch; do
+    local i=0 repo_name repo_url is_private topics pushed default_branch
+    while IFS=$'\t' read -r repo_name repo_url is_private topics pushed default_branch; do
         i=$((i + 1))
         SCAN_POSITION=$i
         # Only --topics shows the topics.
@@ -227,6 +237,7 @@ scan_repos() {
         if [[ $TOPICS_SHOW -eq 1 && "$topics" != "-" ]]; then
             CURRENT_TOPICS="$topics"
         fi
+        CURRENT_PUSHED="${pushed#-}"
         log INFO "Scanning repo $i/$TOTAL_REPOS: $repo_name"
 
         # Visibility
@@ -235,6 +246,13 @@ scan_repos() {
             visibility="private"
         else
             visibility="public"
+        fi
+
+        # The list needs no request per repository.
+        if [[ $LIST_ONLY -eq 1 ]]; then
+            CURRENT_BRANCH_STATUS=""
+            record_result "$repo_url" "" "" "$visibility" "" "LISTED"
+            continue
         fi
 
         # Determine which branches to use
@@ -356,9 +374,9 @@ scan_repos() {
         fi
 
     # The default branch last: it can be empty ("gh repo view" of an empty
-    # repository), and read joins adjacent tabs. No topics: "-", which no
-    # topic can be.
-    done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, ((.topics // []) | join(" ") | if . == "" then "-" else . end), (.defaultBranchRef.name // "main")] | @tsv')
+    # repository), and read joins adjacent tabs. No topics or no push: "-",
+    # which no topic or time can be.
+    done < <(echo "$REPOS_DATA" | jq -r '.[] | [.name, .url, .isPrivate, ((.topics // []) | join(" ") | if . == "" then "-" else . end), (.pushedAt // "-"), (.defaultBranchRef.name // "main")] | @tsv')
     trap - INT
 
     clear_progress

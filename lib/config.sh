@@ -51,6 +51,10 @@ TOPICS_FILTER=""
 # 1 with --topics, with or without a regex: the rows show the topics.
 TOPICS_SHOW=0
 SHOW_VISIBILITY=0
+# --sort: "name", or "pushed" (newest push first, with a PUSHED column).
+SORT="name"
+# 1 without --packages and --filename-match: list the repositories only.
+LIST_ONLY=0
 # --output-text, --output-md, --output-html, --output-pdf: the files for the
 # results, and their width in columns.
 OUTPUT_TEXT=""
@@ -131,6 +135,10 @@ declare -a RESULT_PACKAGES=()
 declare -a RESULT_TOPICS=()
 # The topics of the repository that is scanned now, for record_result.
 CURRENT_TOPICS=""
+# The last push to the repository ("2026-10-22T18:53:33Z"), or empty.
+declare -a RESULT_PUSHED=()
+# The last push of the repository that is scanned now, for record_result.
+CURRENT_PUSHED=""
 declare -a RESULT_STATUS=()
 
 # Counters

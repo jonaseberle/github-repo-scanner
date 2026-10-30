@@ -10,6 +10,7 @@ single repository) to find repos that use a package in an affected version range
 
 ${BOLD}USAGE:${NC}
     ./gh-dep-scanner.sh --url=<url> --type=<type> --packages[=regex] [OPTIONS]
+    ./gh-dep-scanner.sh --url=<url> [--sort=pushed] [OPTIONS]  (list the repositories only)
 
 ${BOLD}OPTIONS:${NC}
     Options with a value take the form --option=value.
@@ -117,6 +118,14 @@ ${BOLD}OPTIONS:${NC}
 
     --show-visibility   Optional: add a column with the repository
                         visibility (public/private)
+
+    --sort=<order>      Optional: the order of the rows in each group:
+                          name    by URL (default)
+                          pushed  by the last push to any branch, newest
+                                  first, with a column PUSHED (UTC)
+                        Without --packages and --filename-match, only the
+                        repositories are listed, without requests per
+                        repository. Example: --url=... --sort=pushed
 
     --output-text[=file], --output-md[=file], --output-html[=file],
     --output-pdf[=file]
@@ -310,6 +319,9 @@ parse_args() {
             --show-visibility)
                 SHOW_VISIBILITY=1
                 ;;
+            --sort=*)
+                SORT="${1#*=}"
+                ;;
             --output-text=*)
                 OUTPUT_TEXT="${1#*=}"
                 ;;
@@ -351,7 +363,7 @@ parse_args() {
                 show_help
                 exit 0
                 ;;
-            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths|--filename-match)
+            --url|--type|--affected|--repo|--branch|--delay|--cache-repo-list-max-age|--excludePaths|--filename-match|--sort)
                 print_error "$1 needs a value: use $1=<value>."
                 exit 1
                 ;;
